@@ -4,6 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FeedResponse, RefreshResponse, SourceHealth, SourceId } from "../lib/domain";
 import { REFRESH_INTERVAL_MS, shouldAutoRefresh } from "../lib/refresh-policy";
 import { SOURCES } from "../lib/sources";
+import {
+  type AppliedTimeRange,
+  formatTimeRangeLabel,
+  getBeijingInputBounds,
+  toBeijingIsoMinute,
+  validateBeijingLocalRange,
+} from "../lib/time-range";
 
 const EMPTY_FEED: FeedResponse = {
   items: [],
@@ -36,10 +43,15 @@ function newestSuccess(sources: SourceHealth[]): number {
 async function requestFeed(
   nextQuery = "",
   nextSource: SourceId | "all" = "all",
+  range: AppliedTimeRange | null = null,
 ): Promise<FeedResponse> {
   const params = new URLSearchParams();
   if (nextQuery.trim()) params.set("q", nextQuery.trim());
   if (nextSource !== "all") params.set("source", nextSource);
+  if (range) {
+    params.set("from", toBeijingIsoMinute(range.from));
+    params.set("to", toBeijingIsoMinute(range.to));
+  }
   const response = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
   const payload = await response.json() as FeedResponse & { error?: string };
   if (!response.ok) throw new Error(payload.error ?? "无法读取信息流");
@@ -54,12 +66,38 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState("正在连接四个公开来源…");
   const [fatalError, setFatalError] = useState<string | null>(null);
+  const [timeEditorOpen, setTimeEditorOpen] = useState(false);
+  const [draftFrom, setDraftFrom] = useState("");
+  const [draftTo, setDraftTo] = useState("");
+  const [appliedRange, setAppliedRange] =
+    useState<AppliedTimeRange | null>(null);
+  const [timeError, setTimeError] = useState<string | null>(null);
+  const pickerBounds = useMemo(() => getBeijingInputBounds(), []);
   const refreshingRef = useRef(false);
-  const filtersRef = useRef({ query, sourceId });
+  const filtersRef = useRef({ query, sourceId, appliedRange });
 
   useEffect(() => {
-    filtersRef.current = { query, sourceId };
-  }, [query, sourceId]);
+    filtersRef.current = { query, sourceId, appliedRange };
+  }, [query, sourceId, appliedRange]);
+
+  function applyTimeRange() {
+    try {
+      validateBeijingLocalRange(draftFrom, draftTo);
+      setAppliedRange({ from: draftFrom, to: draftTo });
+      setTimeError(null);
+      setTimeEditorOpen(false);
+    } catch (error) {
+      setTimeError(error instanceof Error ? error.message : "时间范围无效");
+    }
+  }
+
+  function clearTimeRange() {
+    setDraftFrom("");
+    setDraftTo("");
+    setAppliedRange(null);
+    setTimeError(null);
+    setTimeEditorOpen(false);
+  }
 
   const refresh = useCallback(async (manual = false) => {
     if (refreshingRef.current) return;
@@ -78,7 +116,11 @@ export default function Dashboard() {
         setNotice("刷新成功");
       }
       const currentFilters = filtersRef.current;
-      const nextFeed = await requestFeed(currentFilters.query, currentFilters.sourceId);
+      const nextFeed = await requestFeed(
+        currentFilters.query,
+        currentFilters.sourceId,
+        currentFilters.appliedRange,
+      );
       setFeed(nextFeed);
       setFatalError(null);
     } catch (error) {
@@ -119,7 +161,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void requestFeed(query, sourceId)
+      void requestFeed(query, sourceId, appliedRange)
         .then((payload) => {
           setFeed(payload);
           setFatalError(null);
@@ -129,7 +171,7 @@ export default function Dashboard() {
         });
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [query, sourceId]);
+  }, [query, sourceId, appliedRange]);
 
   const unhealthy = feed.sources.filter((source) => source.status === "error");
   const healthyCount = feed.sources.filter((source) => source.status === "ok").length;
@@ -181,10 +223,54 @@ export default function Dashboard() {
             </button>
           ))}
         </div>
+        <button
+          className={`time-filter-button ${appliedRange ? "filter-active" : ""}`}
+          aria-expanded={timeEditorOpen}
+          aria-controls="time-range-editor"
+          onClick={() => setTimeEditorOpen((open) => !open)}
+        >
+          {appliedRange ? formatTimeRangeLabel(appliedRange) : "时间范围"}
+        </button>
         <button className="refresh-button" disabled={refreshing} onClick={() => void refresh(true)}>
           {refreshing ? "刷新中…" : "立即刷新"}
         </button>
       </section>
+
+      {timeEditorOpen && (
+        <section id="time-range-editor" className="time-range-editor">
+          <label>
+            <span>开始时间</span>
+            <input
+              type="datetime-local"
+              value={draftFrom}
+              min={pickerBounds.min}
+              max={pickerBounds.max}
+              step={60}
+              onChange={(event) => setDraftFrom(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>结束时间</span>
+            <input
+              type="datetime-local"
+              value={draftTo}
+              min={pickerBounds.min}
+              max={pickerBounds.max}
+              step={60}
+              onChange={(event) => setDraftTo(event.target.value)}
+            />
+          </label>
+          <div className="time-range-actions">
+            <button className="time-apply-button" onClick={applyTimeRange}>
+              应用
+            </button>
+            <button className="time-clear-button" onClick={clearTimeRange}>
+              清除
+            </button>
+          </div>
+          {timeError && <p className="time-range-error" role="alert">{timeError}</p>}
+        </section>
+      )}
 
       {unhealthy.length > 0 && (
         <aside className="source-alert" role="status">
