@@ -100,6 +100,19 @@ export function getBeijingInputBounds(now = Date.now()): {
   };
 }
 
+export function getBeijingDayBounds(now = Date.now()): {
+  fromMs: number;
+  toMs: number;
+} {
+  const beijingDate = new Date(now + BEIJING_OFFSET_MS)
+    .toISOString()
+    .slice(0, 10);
+  return {
+    fromMs: Date.parse(`${beijingDate}T00:00:00+08:00`),
+    toMs: now,
+  };
+}
+
 export function formatTimeRangeLabel(range: AppliedTimeRange): string {
   return `${range.from.slice(5).replace("T", " ")} → ${range.to.slice(5).replace("T", " ")}`;
 }

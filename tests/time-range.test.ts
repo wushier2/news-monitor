@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatTimeRangeLabel,
+  getBeijingDayBounds,
   getBeijingInputBounds,
   parseBeijingRange,
   toBeijingIsoMinute,
@@ -66,5 +67,13 @@ describe("Beijing time range", () => {
       from: "2026-07-29T09:30",
       to: "2026-07-30T18:00",
     })).toBe("07-29 09:30 → 07-30 18:00");
+  });
+
+  it("builds the current Beijing day bounds through the exact current instant", () => {
+    const current = Date.parse("2026-07-30T11:45:30.123Z");
+    expect(getBeijingDayBounds(current)).toEqual({
+      fromMs: Date.parse("2026-07-30T00:00:00+08:00"),
+      toMs: current,
+    });
   });
 });
