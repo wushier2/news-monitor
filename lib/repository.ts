@@ -76,7 +76,13 @@ export async function setSourceFailure(
 
 export async function listFeed(
   db: D1Database,
-  options: { query?: string; sourceId?: SourceId; limit: number },
+  options: {
+    query?: string;
+    sourceId?: SourceId;
+    limit: number;
+    fromMs?: number;
+    toExclusiveMs?: number;
+  },
 ): Promise<FeedItem[]> {
   const where: string[] = [];
   const values: unknown[] = [];
@@ -88,6 +94,13 @@ export async function listFeed(
     where.push("(title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\')");
     const escaped = options.query.replace(/[\\%_]/g, "\\$&");
     values.push(`%${escaped}%`, `%${escaped}%`);
+  }
+  if (options.fromMs !== undefined && options.toExclusiveMs !== undefined) {
+    where.push(`
+      COALESCE(published_at, first_seen_at) >= ?
+      AND COALESCE(published_at, first_seen_at) < ?
+    `);
+    values.push(options.fromMs, options.toExclusiveMs);
   }
   values.push(Math.min(Math.max(options.limit, 1), 100));
   const result = await db.prepare(`

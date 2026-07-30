@@ -90,4 +90,62 @@ describe("monitor repository", () => {
     expect(testDb.sqlite.prepare("SELECT url FROM items").all())
       .toEqual([{ url: "https://36kr.com/newsflashes/new" }]);
   });
+
+  it("filters inclusive Beijing minutes and composes with source and query", async () => {
+    await upsertItems(testDb.db, [
+      item({
+        title: "边界政策",
+        url: "https://36kr.com/newsflashes/start",
+        publishedAt: "2026-07-30T01:30:00.000Z",
+      }),
+      item({
+        title: "边界政策",
+        url: "https://36kr.com/newsflashes/end",
+        publishedAt: "2026-07-30T10:00:59.999Z",
+      }),
+      item({
+        title: "边界政策",
+        url: "https://36kr.com/newsflashes/excluded",
+        publishedAt: "2026-07-30T10:01:00.000Z",
+      }),
+      item({
+        sourceId: "cls-headline",
+        sourceName: "财联社",
+        channelName: "头条",
+        title: "边界政策",
+        url: "https://www.cls.cn/detail/2",
+        publishedAt: "2026-07-30T05:00:00.000Z",
+      }),
+    ], new Date("2026-07-30T10:02:00.000Z"));
+
+    const rows = await listFeed(testDb.db, {
+      query: "政策",
+      sourceId: "36kr-macro",
+      limit: 100,
+      fromMs: Date.parse("2026-07-30T09:30:00+08:00"),
+      toExclusiveMs: Date.parse("2026-07-30T18:01:00+08:00"),
+    });
+
+    expect(rows.map((row) => row.url)).toEqual([
+      "https://36kr.com/newsflashes/end",
+      "https://36kr.com/newsflashes/start",
+    ]);
+  });
+
+  it("uses firstSeenAt when publishedAt is missing", async () => {
+    await upsertItems(testDb.db, [
+      item({
+        url: "https://36kr.com/newsflashes/fallback",
+        publishedAt: null,
+      }),
+    ], new Date("2026-07-30T02:15:00.000Z"));
+
+    const rows = await listFeed(testDb.db, {
+      limit: 100,
+      fromMs: Date.parse("2026-07-30T10:15:00+08:00"),
+      toExclusiveMs: Date.parse("2026-07-30T10:16:00+08:00"),
+    });
+    expect(rows.map((row) => row.url))
+      .toEqual(["https://36kr.com/newsflashes/fallback"]);
+  });
 });
