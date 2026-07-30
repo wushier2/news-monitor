@@ -92,6 +92,68 @@ button:focus-visible, input:focus-visible, a:focus-visible {
   font-size: 12px;
 }
 .source-filters .filter-active { color: #fff; background: var(--forest); border-color: var(--forest); }
+.time-filter-button {
+  min-width: max-content;
+  padding: 8px 11px;
+  border: 1px solid #d4dbd3;
+  border-radius: 7px;
+  color: #56645b;
+  background: #fff;
+  font-size: 12px;
+}
+.time-filter-button.filter-active {
+  color: #fff;
+  background: var(--forest);
+  border-color: var(--forest);
+}
+.time-range-editor {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  padding: 11px 18px;
+  background: #f8f9f6;
+  border-bottom: 1px solid var(--line);
+}
+.time-range-editor label {
+  display: grid;
+  gap: 5px;
+  color: #66736b;
+  font-size: 10px;
+}
+.time-range-editor input {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #d4dbd3;
+  border-radius: 7px;
+  color: var(--ink);
+  background: #fff;
+}
+.time-range-actions {
+  display: flex;
+  gap: 7px;
+}
+.time-range-actions button {
+  height: 36px;
+  padding: 0 13px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.time-apply-button {
+  color: #fff;
+  background: var(--forest);
+  border: 1px solid var(--forest);
+}
+.time-clear-button {
+  color: #56645b;
+  background: #fff;
+  border: 1px solid #d4dbd3;
+}
+.time-range-error {
+  align-self: center;
+  margin: 0 0 0 4px;
+  color: #a3412b;
+  font-size: 11px;
+}
 .refresh-button {
   margin-left: auto;
   min-width: 92px;
@@ -171,6 +233,23 @@ footer {
   .toolbar { flex-wrap: wrap; padding: 10px 12px; }
   .search-wrap { max-width: none; flex-basis: calc(100% - 104px); }
   .source-filters { order: 3; width: 100%; }
+  .time-filter-button {
+    order: 2;
+    max-width: calc(100% - 104px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .time-range-editor {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 9px;
+    padding: 11px 12px;
+  }
+  .time-range-editor input { width: 100%; }
+  .time-range-actions { justify-content: flex-end; }
+  .time-range-error { margin: 0; }
   .refresh-button { margin-left: 0; }
   .feed-heading { padding: 20px 16px 12px; }
   .feed-heading p { display: none; }
