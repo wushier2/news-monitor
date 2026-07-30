@@ -39,6 +39,10 @@ describe("Beijing time range", () => {
     )).toThrow("未来");
   });
 
+  it("requires both local picker values before applying a dashboard range", () => {
+    expect(() => validateBeijingLocalRange("", "", now)).toThrow("同时");
+  });
+
   it.each([
     [undefined, "2026-07-30T11:20:00+08:00", "同时"],
     ["2026-07-30T11:20:00+08:00", undefined, "同时"],

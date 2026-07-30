@@ -77,9 +77,10 @@ export function validateBeijingLocalRange(
   to: string,
   now = Date.now(),
 ): TimeRangeBounds {
+  if (!from || !to) throw new Error("请同时选择开始和结束时间");
   return parseBeijingRange(
-    from ? toBeijingIsoMinute(from) : undefined,
-    to ? toBeijingIsoMinute(to) : undefined,
+    toBeijingIsoMinute(from),
+    toBeijingIsoMinute(to),
     now,
   );
 }
