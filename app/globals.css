@@ -214,6 +214,57 @@ button:focus-visible, input:focus-visible, a:focus-visible {
 .empty-state span { color: var(--amber); font-size: 11px; font-weight: 800; letter-spacing: .12em; }
 .empty-state h3 { margin: 10px 0 8px; color: var(--ink); font-family: "STSong", "SimSun", serif; font-size: 24px; }
 .empty-state p { margin: 0; font-size: 12px; }
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 58px;
+  padding: 10px 26px;
+  border-top: 1px solid var(--line);
+  background: #fbfcf9;
+}
+.pagination-total {
+  min-width: 86px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.pagination-controls button {
+  min-width: 34px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #d4dbd3;
+  border-radius: 7px;
+  color: #56645b;
+  background: #fff;
+  font-size: 12px;
+}
+.pagination-controls .page-active {
+  color: #fff;
+  background: var(--forest);
+  border-color: var(--forest);
+}
+.pagination-controls button:disabled {
+  cursor: default;
+  opacity: .45;
+}
+.pagination-ellipsis {
+  width: 18px;
+  color: #8a948e;
+  text-align: center;
+}
+.pagination-error {
+  min-width: 86px;
+  color: #a3412b;
+  text-align: right;
+  font-size: 11px;
+}
 footer {
   display: flex;
   justify-content: center;
@@ -256,5 +307,29 @@ footer {
   .feed-item { grid-template-columns: 82px minmax(0, 1fr); gap: 12px; padding: 16px; }
   .feed-item time { display: none; }
   .item-content h3 { font-size: 15px; }
+  .pagination {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .pagination-total {
+    width: 100%;
+    text-align: center;
+  }
+  .pagination-controls {
+    max-width: 100%;
+    gap: 4px;
+  }
+  .pagination-controls button {
+    min-width: 30px;
+    height: 32px;
+    padding: 0 7px;
+  }
+  .pagination-ellipsis { width: 12px; }
+  .pagination-error {
+    width: 100%;
+    text-align: center;
+  }
   footer { flex-wrap: wrap; gap: 8px 16px; }
 }

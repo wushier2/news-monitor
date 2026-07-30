@@ -229,21 +229,24 @@ export default function Dashboard() {
   useEffect(() => {
     let active = true;
     mountedRef.current = true;
-    void loadFeed("", "all", null, 1, "initial").then((payload) => {
-      if (!active || !payload) return;
-      const lastSuccess = newestSuccess(payload.sources);
-      if (shouldAutoRefresh(lastSuccess ? new Date(lastSuccess).toISOString() : null)) {
-        void refresh(false);
-      } else {
-        setNotice("信息流已是最新状态");
-        setLoading(false);
-      }
-    });
+    const initialTimer = window.setTimeout(() => {
+      void loadFeed("", "all", null, 1, "initial").then((payload) => {
+        if (!active || !payload) return;
+        const lastSuccess = newestSuccess(payload.sources);
+        if (shouldAutoRefresh(lastSuccess ? new Date(lastSuccess).toISOString() : null)) {
+          void refresh(false);
+        } else {
+          setNotice("信息流已是最新状态");
+          setLoading(false);
+        }
+      });
+    }, 0);
     const timer = window.setInterval(() => void refresh(false), REFRESH_INTERVAL_MS);
     return () => {
       active = false;
       mountedRef.current = false;
       requestSequenceRef.current += 1;
+      window.clearTimeout(initialTimer);
       window.clearInterval(timer);
     };
   }, [loadFeed, refresh]);
