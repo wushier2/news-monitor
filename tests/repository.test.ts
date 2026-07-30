@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { NormalizedItem } from "../lib/domain";
-import { deleteExpiredItems, listFeed, upsertItems } from "../lib/repository";
+import {
+  countItemsInRange,
+  deleteExpiredItems,
+  listFeedPage,
+  upsertItems,
+} from "../lib/repository";
 import { createTestD1 } from "./helpers/d1";
 
 const migration = readFileSync(
@@ -73,8 +78,14 @@ describe("monitor repository", () => {
       }),
     ], new Date("2026-07-29T11:01:00.000Z"));
 
-    const rows = await listFeed(testDb.db, { query: "%", limit: 100 });
-    expect(rows.map((row) => row.title)).toEqual(["GDP 增长 100%"]);
+    const page = await listFeedPage(testDb.db, {
+      query: "%",
+      limit: 50,
+      page: 1,
+      pageSize: 50,
+    });
+    expect(page.items.map((row) => row.title)).toEqual(["GDP 增长 100%"]);
+    expect(page.totalItems).toBe(1);
   });
 
   it("deletes only rows older than the seven-day cutoff", async () => {
@@ -118,18 +129,21 @@ describe("monitor repository", () => {
       }),
     ], new Date("2026-07-30T10:02:00.000Z"));
 
-    const rows = await listFeed(testDb.db, {
+    const page = await listFeedPage(testDb.db, {
       query: "政策",
       sourceId: "36kr-macro",
-      limit: 100,
+      limit: 50,
+      page: 1,
+      pageSize: 50,
       fromMs: Date.parse("2026-07-30T09:30:00+08:00"),
       toExclusiveMs: Date.parse("2026-07-30T18:01:00+08:00"),
     });
 
-    expect(rows.map((row) => row.url)).toEqual([
+    expect(page.items.map((row) => row.url)).toEqual([
       "https://36kr.com/newsflashes/end",
       "https://36kr.com/newsflashes/start",
     ]);
+    expect(page.totalItems).toBe(2);
   });
 
   it("uses firstSeenAt when publishedAt is missing", async () => {
@@ -140,12 +154,102 @@ describe("monitor repository", () => {
       }),
     ], new Date("2026-07-30T02:15:00.000Z"));
 
-    const rows = await listFeed(testDb.db, {
-      limit: 100,
+    const page = await listFeedPage(testDb.db, {
+      limit: 50,
+      page: 1,
+      pageSize: 50,
       fromMs: Date.parse("2026-07-30T10:15:00+08:00"),
       toExclusiveMs: Date.parse("2026-07-30T10:16:00+08:00"),
     });
-    expect(rows.map((row) => row.url))
+    expect(page.items.map((row) => row.url))
       .toEqual(["https://36kr.com/newsflashes/fallback"]);
+  });
+
+  it("returns numbered pages and the total matching item count", async () => {
+    const base = Date.parse("2026-07-29T00:00:00.000Z");
+    await upsertItems(
+      testDb.db,
+      Array.from({ length: 105 }, (_, index) => item({
+        title: `分页信息 ${index + 1}`,
+        url: `https://36kr.com/newsflashes/page-${index + 1}`,
+        publishedAt: new Date(base + index * 60_000).toISOString(),
+      })),
+      new Date("2026-07-30T00:00:00.000Z"),
+    );
+
+    const first = await listFeedPage(testDb.db, {
+      limit: 50,
+      page: 1,
+      pageSize: 50,
+    });
+    const second = await listFeedPage(testDb.db, {
+      limit: 50,
+      page: 2,
+      pageSize: 50,
+    });
+    const third = await listFeedPage(testDb.db, {
+      limit: 50,
+      page: 3,
+      pageSize: 50,
+    });
+    const overflow = await listFeedPage(testDb.db, {
+      limit: 50,
+      page: 4,
+      pageSize: 50,
+    });
+
+    expect(first.totalItems).toBe(105);
+    expect(first.items).toHaveLength(50);
+    expect(first.items[0]?.title).toBe("分页信息 105");
+    expect(second.items).toHaveLength(50);
+    expect(second.items[0]?.title).toBe("分页信息 55");
+    expect(third.items).toHaveLength(5);
+    expect(third.items[0]?.title).toBe("分页信息 5");
+    expect(overflow.items).toEqual([]);
+  });
+
+  it("uses descending id as a stable tie-breaker", async () => {
+    await upsertItems(testDb.db, [
+      item({ title: "同刻信息 1", url: "https://36kr.com/newsflashes/tie-1" }),
+      item({ title: "同刻信息 2", url: "https://36kr.com/newsflashes/tie-2" }),
+      item({ title: "同刻信息 3", url: "https://36kr.com/newsflashes/tie-3" }),
+    ], new Date("2026-07-29T10:01:00.000Z"));
+
+    const page = await listFeedPage(testDb.db, {
+      limit: 50,
+      page: 1,
+      pageSize: 50,
+    });
+    expect(page.items.map((row) => row.title)).toEqual([
+      "同刻信息 3",
+      "同刻信息 2",
+      "同刻信息 1",
+    ]);
+  });
+
+  it("counts items in an exact time range independently from feed filters", async () => {
+    await upsertItems(testDb.db, [
+      item({
+        url: "https://36kr.com/newsflashes/yesterday",
+        publishedAt: "2026-07-29T15:59:59.999Z",
+      }),
+      item({
+        url: "https://36kr.com/newsflashes/today-start",
+        publishedAt: "2026-07-29T16:00:00.000Z",
+      }),
+      item({
+        url: "https://36kr.com/newsflashes/today-now",
+        publishedAt: "2026-07-30T11:45:30.123Z",
+      }),
+      item({
+        url: "https://36kr.com/newsflashes/future",
+        publishedAt: "2026-07-30T11:45:30.124Z",
+      }),
+    ], new Date("2026-07-30T11:46:00.000Z"));
+
+    expect(await countItemsInRange(testDb.db, {
+      fromMs: Date.parse("2026-07-30T00:00:00+08:00"),
+      toMs: Date.parse("2026-07-30T11:45:30.123Z"),
+    })).toBe(2);
   });
 });

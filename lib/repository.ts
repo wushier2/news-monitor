@@ -4,8 +4,66 @@ import { SOURCES } from "./sources";
 
 type D1Row = Record<string, unknown>;
 
+export interface FeedQueryOptions {
+  query?: string;
+  sourceId?: SourceId;
+  limit: number;
+  page: number;
+  pageSize: number;
+  fromMs?: number;
+  toExclusiveMs?: number;
+}
+
+export interface FeedPage {
+  items: FeedItem[];
+  totalItems: number;
+}
+
 function iso(value: unknown): string | null {
   return typeof value === "number" ? new Date(value).toISOString() : null;
+}
+
+function feedFilter(options: FeedQueryOptions): {
+  clause: string;
+  values: unknown[];
+} {
+  const where: string[] = [];
+  const values: unknown[] = [];
+  if (options.sourceId) {
+    where.push("source_id = ?");
+    values.push(options.sourceId);
+  }
+  if (options.query) {
+    where.push("(title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\')");
+    const escaped = options.query.replace(/[\\%_]/g, "\\$&");
+    values.push(`%${escaped}%`, `%${escaped}%`);
+  }
+  if (options.fromMs !== undefined && options.toExclusiveMs !== undefined) {
+    where.push(`
+      COALESCE(published_at, first_seen_at) >= ?
+      AND COALESCE(published_at, first_seen_at) < ?
+    `);
+    values.push(options.fromMs, options.toExclusiveMs);
+  }
+  return {
+    clause: where.length ? `WHERE ${where.join(" AND ")}` : "",
+    values,
+  };
+}
+
+function feedItem(row: D1Row): FeedItem {
+  return {
+    id: Number(row.id),
+    sourceId: row.source_id as SourceId,
+    sourceName: String(row.source_name),
+    channelName: String(row.channel_name),
+    title: String(row.title),
+    summary: String(row.summary ?? ""),
+    url: String(row.url),
+    publishedAt: iso(row.published_at),
+    firstSeenAt: iso(row.first_seen_at) ?? new Date(0).toISOString(),
+    lastSeenAt: iso(row.last_seen_at) ?? new Date(0).toISOString(),
+  };
 }
 
 export async function upsertItems(db: D1Database, incoming: NormalizedItem[], now: Date): Promise<number> {
@@ -76,53 +134,54 @@ export async function setSourceFailure(
 
 export async function listFeed(
   db: D1Database,
-  options: {
-    query?: string;
-    sourceId?: SourceId;
-    limit: number;
-    fromMs?: number;
-    toExclusiveMs?: number;
-  },
+  options: Omit<FeedQueryOptions, "page" | "pageSize">,
 ): Promise<FeedItem[]> {
-  const where: string[] = [];
-  const values: unknown[] = [];
-  if (options.sourceId) {
-    where.push("source_id = ?");
-    values.push(options.sourceId);
-  }
-  if (options.query) {
-    where.push("(title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\')");
-    const escaped = options.query.replace(/[\\%_]/g, "\\$&");
-    values.push(`%${escaped}%`, `%${escaped}%`);
-  }
-  if (options.fromMs !== undefined && options.toExclusiveMs !== undefined) {
-    where.push(`
-      COALESCE(published_at, first_seen_at) >= ?
-      AND COALESCE(published_at, first_seen_at) < ?
-    `);
-    values.push(options.fromMs, options.toExclusiveMs);
-  }
-  values.push(Math.min(Math.max(options.limit, 1), 100));
+  const page = await listFeedPage(db, {
+    ...options,
+    page: 1,
+    pageSize: options.limit,
+  });
+  return page.items;
+}
+
+export async function listFeedPage(
+  db: D1Database,
+  options: FeedQueryOptions,
+): Promise<FeedPage> {
+  const filter = feedFilter(options);
+  const countRow = await db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM items
+    ${filter.clause}
+  `).bind(...filter.values).first<{ count: number }>();
+  const pageSize = Math.min(Math.max(options.pageSize, 1), 100);
+  const page = Math.max(options.page, 1);
+  const values = [...filter.values, pageSize, (page - 1) * pageSize];
   const result = await db.prepare(`
     SELECT id, source_id, source_name, channel_name, title, summary, url,
       published_at, first_seen_at, last_seen_at
     FROM items
-    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-    ORDER BY COALESCE(published_at, first_seen_at) DESC
-    LIMIT ?
+    ${filter.clause}
+    ORDER BY COALESCE(published_at, first_seen_at) DESC, id DESC
+    LIMIT ? OFFSET ?
   `).bind(...values).all<D1Row>();
-  return result.results.map((row) => ({
-    id: Number(row.id),
-    sourceId: row.source_id as SourceId,
-    sourceName: String(row.source_name),
-    channelName: String(row.channel_name),
-    title: String(row.title),
-    summary: String(row.summary ?? ""),
-    url: String(row.url),
-    publishedAt: iso(row.published_at),
-    firstSeenAt: iso(row.first_seen_at) ?? new Date(0).toISOString(),
-    lastSeenAt: iso(row.last_seen_at) ?? new Date(0).toISOString(),
-  }));
+  return {
+    items: result.results.map(feedItem),
+    totalItems: Number(countRow?.count ?? 0),
+  };
+}
+
+export async function countItemsInRange(
+  db: D1Database,
+  range: { fromMs: number; toMs: number },
+): Promise<number> {
+  const row = await db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM items
+    WHERE COALESCE(published_at, first_seen_at) >= ?
+      AND COALESCE(published_at, first_seen_at) <= ?
+  `).bind(range.fromMs, range.toMs).first<{ count: number }>();
+  return Number(row?.count ?? 0);
 }
 
 export async function getSourceStatuses(db: D1Database): Promise<SourceHealth[]> {
