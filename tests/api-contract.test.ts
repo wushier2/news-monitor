@@ -1,20 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const fakes = vi.hoisted(() => ({
+  countItemsInRange: vi.fn(),
   db: {} as D1Database,
   ensureSchema: vi.fn(),
   getLastSuccessfulIngestion: vi.fn(),
   getSourceStatuses: vi.fn(),
-  listFeed: vi.fn(),
+  listFeedPage: vi.fn(),
   runIngestion: vi.fn(),
 }));
 
 vi.mock("../db", () => ({ getD1: () => fakes.db }));
 vi.mock("../db/ensure", () => ({ ensureSchema: fakes.ensureSchema }));
 vi.mock("../lib/repository", () => ({
+  countItemsInRange: fakes.countItemsInRange,
   getLastSuccessfulIngestion: fakes.getLastSuccessfulIngestion,
   getSourceStatuses: fakes.getSourceStatuses,
-  listFeed: fakes.listFeed,
+  listFeedPage: fakes.listFeedPage,
 }));
 vi.mock("../lib/ingestion", () => ({ runIngestion: fakes.runIngestion }));
 
@@ -25,7 +27,8 @@ describe("feed and refresh API contracts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fakes.ensureSchema.mockResolvedValue(undefined);
-    fakes.listFeed.mockResolvedValue([]);
+    fakes.listFeedPage.mockResolvedValue({ items: [], totalItems: 0 });
+    fakes.countItemsInRange.mockResolvedValue(0);
     fakes.getSourceStatuses.mockResolvedValue([]);
   });
 
@@ -46,7 +49,7 @@ describe("feed and refresh API contracts", () => {
     const response = await GET(new Request("https://example.test/api/feed?limit=999"));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(fakes.listFeed).toHaveBeenCalledWith(fakes.db, {
+    expect(fakes.listFeedPage).toHaveBeenCalledWith(fakes.db, {
       query: undefined,
       sourceId: undefined,
       limit: 50,
@@ -65,7 +68,7 @@ describe("feed and refresh API contracts", () => {
         `https://example.test/api/feed?from=${from}&to=${to}`,
       ));
       expect(response.status).toBe(200);
-      expect(fakes.listFeed).toHaveBeenCalledWith(fakes.db, {
+      expect(fakes.listFeedPage).toHaveBeenCalledWith(fakes.db, {
         query: undefined,
         sourceId: undefined,
         limit: 50,
@@ -86,7 +89,47 @@ describe("feed and refresh API contracts", () => {
       `https://example.test/api/feed?from=${from}&to=${to}`,
     ));
     expect(response.status).toBe(400);
-    expect(fakes.listFeed).not.toHaveBeenCalled();
+    expect(fakes.listFeedPage).not.toHaveBeenCalled();
+  });
+
+  it("returns pagination metadata and an independent Beijing today count", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-30T11:45:30.123Z"));
+    fakes.listFeedPage.mockResolvedValue({
+      items: [{ id: 101 }],
+      totalItems: 105,
+    });
+    fakes.countItemsInRange.mockResolvedValue(23);
+    try {
+      const response = await GET(new Request(
+        "https://example.test/api/feed?page=3&pageSize=50&q=政策",
+      ));
+      expect(response.status).toBe(200);
+      expect(fakes.countItemsInRange).toHaveBeenCalledWith(fakes.db, {
+        fromMs: Date.parse("2026-07-30T00:00:00+08:00"),
+        toMs: Date.parse("2026-07-30T11:45:30.123Z"),
+      });
+      expect(await response.json()).toEqual({
+        items: [{ id: 101 }],
+        sources: [],
+        generatedAt: "2026-07-30T11:45:30.123Z",
+        todayCount: 23,
+        pagination: {
+          page: 3,
+          pageSize: 50,
+          totalItems: 105,
+          totalPages: 3,
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns 400 for invalid pagination values", async () => {
+    const response = await GET(new Request("https://example.test/api/feed?page=0"));
+    expect(response.status).toBe(400);
+    expect(fakes.listFeedPage).not.toHaveBeenCalled();
   });
 
   it("returns 202 without ingestion when data is still fresh", async () => {

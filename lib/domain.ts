@@ -42,10 +42,19 @@ export interface SourceResult {
   fetchedAt: string;
 }
 
+export interface PaginationMeta {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+}
+
 export interface FeedResponse {
   items: FeedItem[];
   sources: SourceHealth[];
   generatedAt: string;
+  todayCount: number;
+  pagination: PaginationMeta;
 }
 
 export interface RefreshResponse {
