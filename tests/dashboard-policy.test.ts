@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getPageTokens } from "../lib/pagination";
 import { REFRESH_INTERVAL_MS, shouldAutoRefresh } from "../lib/refresh-policy";
 import {
   formatTimeRangeLabel,
@@ -32,5 +33,19 @@ describe("dashboard refresh policy", () => {
       min: "2026-07-23T11:45",
       max: "2026-07-30T11:45",
     });
+  });
+
+  it("keeps at most five numeric page buttons", () => {
+    const tokens = getPageTokens(50, 100);
+    expect(tokens.filter((token) => typeof token === "number")).toHaveLength(5);
+    expect(tokens).toEqual([
+      1,
+      "ellipsis-left",
+      49,
+      50,
+      51,
+      "ellipsis-right",
+      100,
+    ]);
   });
 });

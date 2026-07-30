@@ -1,16 +1,33 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FeedResponse, RefreshResponse, SourceHealth, SourceId } from "../lib/domain";
+import type {
+  FeedResponse,
+  PaginationMeta,
+  RefreshResponse,
+  SourceHealth,
+  SourceId,
+} from "../lib/domain";
+import {
+  buildFeedSearchParams,
+  getPageTokens,
+} from "../lib/pagination";
 import { REFRESH_INTERVAL_MS, shouldAutoRefresh } from "../lib/refresh-policy";
 import { SOURCES } from "../lib/sources";
 import {
   type AppliedTimeRange,
   formatTimeRangeLabel,
   getBeijingInputBounds,
-  toBeijingIsoMinute,
   validateBeijingLocalRange,
 } from "../lib/time-range";
+
+const PAGE_SIZE = 50;
+const EMPTY_PAGINATION: PaginationMeta = {
+  page: 1,
+  pageSize: PAGE_SIZE,
+  totalItems: 0,
+  totalPages: 0,
+};
 
 const EMPTY_FEED: FeedResponse = {
   items: [],
@@ -23,6 +40,8 @@ const EMPTY_FEED: FeedResponse = {
     itemCount: 0,
   })),
   generatedAt: new Date(0).toISOString(),
+  todayCount: 0,
+  pagination: EMPTY_PAGINATION,
 };
 
 function formatTime(value: string | null): string {
@@ -44,15 +63,18 @@ async function requestFeed(
   nextQuery = "",
   nextSource: SourceId | "all" = "all",
   range: AppliedTimeRange | null = null,
+  page = 1,
 ): Promise<FeedResponse> {
-  const params = new URLSearchParams();
-  if (nextQuery.trim()) params.set("q", nextQuery.trim());
-  if (nextSource !== "all") params.set("source", nextSource);
-  if (range) {
-    params.set("from", toBeijingIsoMinute(range.from));
-    params.set("to", toBeijingIsoMinute(range.to));
-  }
-  const response = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
+  const params = buildFeedSearchParams({
+    query: nextQuery,
+    sourceId: nextSource,
+    range,
+    page,
+    pageSize: PAGE_SIZE,
+  });
+  const response = await fetch(`/api/feed?${params.toString()}`, {
+    cache: "no-store",
+  });
   const payload = await response.json() as FeedResponse & { error?: string };
   if (!response.ok) throw new Error(payload.error ?? "无法读取信息流");
   return payload;
@@ -72,9 +94,16 @@ export default function Dashboard() {
   const [appliedRange, setAppliedRange] =
     useState<AppliedTimeRange | null>(null);
   const [timeError, setTimeError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageLoading, setPageLoading] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
   const pickerBounds = useMemo(() => getBeijingInputBounds(), []);
   const refreshingRef = useRef(false);
   const filtersRef = useRef({ query, sourceId, appliedRange });
+  const requestSequenceRef = useRef(0);
+  const filterEffectReadyRef = useRef(false);
+  const mountedRef = useRef(true);
+  const feedHeadingRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     filtersRef.current = { query, sourceId, appliedRange };
@@ -99,6 +128,65 @@ export default function Dashboard() {
     setTimeEditorOpen(false);
   }
 
+  const loadFeed = useCallback(async (
+    nextQuery: string,
+    nextSource: SourceId | "all",
+    nextRange: AppliedTimeRange | null,
+    targetPage: number,
+    reason: "initial" | "filter" | "page" | "refresh",
+  ): Promise<FeedResponse | null> => {
+    const requestId = ++requestSequenceRef.current;
+    setPageError(null);
+    setPageLoading(reason === "page");
+    try {
+      const payload = await requestFeed(
+        nextQuery,
+        nextSource,
+        nextRange,
+        targetPage,
+      );
+      if (
+        !mountedRef.current ||
+        requestId !== requestSequenceRef.current
+      ) {
+        return null;
+      }
+      setFeed(payload);
+      setPage(payload.pagination.page);
+      setFatalError(null);
+      if (reason === "page") {
+        window.requestAnimationFrame(() => {
+          feedHeadingRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        });
+      }
+      return payload;
+    } catch (error) {
+      if (
+        !mountedRef.current ||
+        requestId !== requestSequenceRef.current
+      ) {
+        return null;
+      }
+      const message = error instanceof Error ? error.message : "读取失败";
+      if (reason === "page") {
+        setPageError("分页加载失败");
+      } else {
+        setFatalError(message);
+      }
+      return null;
+    } finally {
+      if (
+        mountedRef.current &&
+        requestId === requestSequenceRef.current
+      ) {
+        setPageLoading(false);
+      }
+    }
+  }, []);
+
   const refresh = useCallback(async (manual = false) => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
@@ -108,6 +196,18 @@ export default function Dashboard() {
       const response = await fetch("/api/refresh", { method: "POST" });
       const payload = await response.json() as RefreshResponse & { error?: string };
       if (!response.ok && response.status !== 207) throw new Error(payload.error ?? "刷新失败");
+      const currentFilters = filtersRef.current;
+      const nextFeed = await loadFeed(
+        currentFilters.query,
+        currentFilters.sourceId,
+        currentFilters.appliedRange,
+        1,
+        "refresh",
+      );
+      if (!nextFeed) {
+        setNotice("刷新后读取第 1 页失败");
+        return;
+      }
       if (payload.status === "skipped") {
         setNotice(`数据仍是最新状态，${payload.retryAfterSeconds ?? 1} 秒后可再次刷新`);
       } else if (payload.status === "partial") {
@@ -115,14 +215,6 @@ export default function Dashboard() {
       } else {
         setNotice("刷新成功");
       }
-      const currentFilters = filtersRef.current;
-      const nextFeed = await requestFeed(
-        currentFilters.query,
-        currentFilters.sourceId,
-        currentFilters.appliedRange,
-      );
-      setFeed(nextFeed);
-      setFatalError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "刷新失败";
       setNotice(message);
@@ -132,14 +224,13 @@ export default function Dashboard() {
       setRefreshing(false);
       setLoading(false);
     }
-  }, []);
+  }, [loadFeed]);
 
   useEffect(() => {
     let active = true;
-    requestFeed().then((payload) => {
-      if (!active) return;
-      setFeed(payload);
-      setFatalError(null);
+    mountedRef.current = true;
+    void loadFeed("", "all", null, 1, "initial").then((payload) => {
+      if (!active || !payload) return;
       const lastSuccess = newestSuccess(payload.sources);
       if (shouldAutoRefresh(lastSuccess ? new Date(lastSuccess).toISOString() : null)) {
         void refresh(false);
@@ -147,42 +238,61 @@ export default function Dashboard() {
         setNotice("信息流已是最新状态");
         setLoading(false);
       }
-    }).catch((error) => {
-      if (!active) return;
-      setFatalError(error instanceof Error ? error.message : "无法读取信息流");
-      void refresh(false);
     });
     const timer = window.setInterval(() => void refresh(false), REFRESH_INTERVAL_MS);
     return () => {
       active = false;
+      mountedRef.current = false;
+      requestSequenceRef.current += 1;
       window.clearInterval(timer);
     };
-  }, [refresh]);
+  }, [loadFeed, refresh]);
 
   useEffect(() => {
+    if (!filterEffectReadyRef.current) {
+      filterEffectReadyRef.current = true;
+      return;
+    }
     const timer = window.setTimeout(() => {
-      void requestFeed(query, sourceId, appliedRange)
-        .then((payload) => {
-          setFeed(payload);
-          setFatalError(null);
-        })
-        .catch((error) => {
-          setFatalError(error instanceof Error ? error.message : "筛选失败");
-        });
+      void loadFeed(
+        query,
+        sourceId,
+        appliedRange,
+        1,
+        "filter",
+      );
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [query, sourceId, appliedRange]);
+  }, [query, sourceId, appliedRange, loadFeed]);
 
   const unhealthy = feed.sources.filter((source) => source.status === "error");
   const healthyCount = feed.sources.filter((source) => source.status === "ok").length;
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayCount = feed.items.filter((item) =>
-    Date.parse(item.publishedAt ?? item.firstSeenAt) >= todayStart.getTime()).length;
   const latestTime = useMemo(() => {
     const value = newestSuccess(feed.sources);
     return value ? new Date(value).toISOString() : null;
   }, [feed.sources]);
+  const pageTokens = useMemo(
+    () => getPageTokens(page, feed.pagination.totalPages),
+    [page, feed.pagination.totalPages],
+  );
+
+  function changePage(targetPage: number) {
+    if (
+      pageLoading ||
+      targetPage < 1 ||
+      targetPage > feed.pagination.totalPages ||
+      targetPage === page
+    ) {
+      return;
+    }
+    void loadFeed(
+      query,
+      sourceId,
+      appliedRange,
+      targetPage,
+      "page",
+    );
+  }
 
   return (
     <main className="dashboard-shell">
@@ -195,7 +305,7 @@ export default function Dashboard() {
           <span className={`pulse ${unhealthy.length ? "pulse-warn" : ""}`} />
           <span>{healthyCount}/4 来源正常</span>
           <span className="header-divider" />
-          <span><strong>{todayCount}</strong> 今日新增</span>
+          <span><strong>{feed.todayCount}</strong> 今日新增</span>
           <span className="header-divider" />
           <span>更新于 <strong>{formatTime(latestTime)}</strong></span>
         </div>
@@ -279,7 +389,7 @@ export default function Dashboard() {
         </aside>
       )}
 
-      <section className="feed-heading">
+      <section ref={feedHeadingRef} className="feed-heading">
         <div>
           <span className="section-kicker">LATEST INTELLIGENCE</span>
           <h2>{sourceId === "all" ? "最新信息流" : SOURCES.find((source) => source.id === sourceId)?.channelName}</h2>
@@ -310,6 +420,47 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+
+      <nav className="pagination" aria-label="信息流分页">
+        <span className="pagination-total">
+          共 {feed.pagination.totalItems} 条
+        </span>
+        {feed.pagination.totalPages > 1 && (
+          <div className="pagination-controls">
+            <button
+              disabled={pageLoading || page <= 1}
+              onClick={() => changePage(page - 1)}
+            >
+              上一页
+            </button>
+            {pageTokens.map((token) => typeof token === "number" ? (
+              <button
+                key={token}
+                className={token === page ? "page-active" : ""}
+                aria-current={token === page ? "page" : undefined}
+                disabled={pageLoading}
+                onClick={() => changePage(token)}
+              >
+                {token}
+              </button>
+            ) : (
+              <span className="pagination-ellipsis" key={token}>…</span>
+            ))}
+            <button
+              disabled={
+                pageLoading ||
+                page >= feed.pagination.totalPages
+              }
+              onClick={() => changePage(page + 1)}
+            >
+              下一页
+            </button>
+          </div>
+        )}
+        {pageError && (
+          <span className="pagination-error" role="alert">{pageError}</span>
+        )}
+      </nav>
 
       <footer>
         <span>保留最近 7 天</span>
