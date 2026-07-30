@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FeedResponse, RefreshResponse, SourceHealth, SourceId } from "../lib/domain";
-import { REFRESH_INTERVAL_MS } from "../lib/refresh-policy";
+import { REFRESH_INTERVAL_MS, shouldAutoRefresh } from "../lib/refresh-policy";
 import { SOURCES } from "../lib/sources";
 
 const EMPTY_FEED: FeedResponse = {
@@ -33,6 +33,19 @@ function newestSuccess(sources: SourceHealth[]): number {
   return Math.max(0, ...sources.map((source) => source.lastSuccessAt ? Date.parse(source.lastSuccessAt) : 0));
 }
 
+async function requestFeed(
+  nextQuery = "",
+  nextSource: SourceId | "all" = "all",
+): Promise<FeedResponse> {
+  const params = new URLSearchParams();
+  if (nextQuery.trim()) params.set("q", nextQuery.trim());
+  if (nextSource !== "all") params.set("source", nextSource);
+  const response = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
+  const payload = await response.json() as FeedResponse & { error?: string };
+  if (!response.ok) throw new Error(payload.error ?? "无法读取信息流");
+  return payload;
+}
+
 export default function Dashboard() {
   const [feed, setFeed] = useState<FeedResponse>(EMPTY_FEED);
   const [query, setQuery] = useState("");
@@ -41,21 +54,16 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState("正在连接四个公开来源…");
   const [fatalError, setFatalError] = useState<string | null>(null);
+  const refreshingRef = useRef(false);
+  const filtersRef = useRef({ query, sourceId });
 
-  const loadFeed = useCallback(async (nextQuery = query, nextSource = sourceId) => {
-    const params = new URLSearchParams();
-    if (nextQuery.trim()) params.set("q", nextQuery.trim());
-    if (nextSource !== "all") params.set("source", nextSource);
-    const response = await fetch(`/api/feed?${params.toString()}`, { cache: "no-store" });
-    const payload = await response.json() as FeedResponse & { error?: string };
-    if (!response.ok) throw new Error(payload.error ?? "无法读取信息流");
-    setFeed(payload);
-    setFatalError(null);
-    return payload;
+  useEffect(() => {
+    filtersRef.current = { query, sourceId };
   }, [query, sourceId]);
 
   const refresh = useCallback(async (manual = false) => {
-    if (refreshing) return;
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
     setRefreshing(true);
     setNotice(manual ? "正在立即刷新…" : "正在同步最新信息…");
     try {
@@ -69,23 +77,29 @@ export default function Dashboard() {
       } else {
         setNotice("刷新成功");
       }
-      await loadFeed();
+      const currentFilters = filtersRef.current;
+      const nextFeed = await requestFeed(currentFilters.query, currentFilters.sourceId);
+      setFeed(nextFeed);
+      setFatalError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "刷新失败";
       setNotice(message);
       setFatalError(message);
     } finally {
+      refreshingRef.current = false;
       setRefreshing(false);
       setLoading(false);
     }
-  }, [loadFeed, refreshing]);
+  }, []);
 
   useEffect(() => {
     let active = true;
-    loadFeed().then((payload) => {
+    requestFeed().then((payload) => {
       if (!active) return;
+      setFeed(payload);
+      setFatalError(null);
       const lastSuccess = newestSuccess(payload.sources);
-      if (!lastSuccess || Date.now() - lastSuccess >= REFRESH_INTERVAL_MS) {
+      if (shouldAutoRefresh(lastSuccess ? new Date(lastSuccess).toISOString() : null)) {
         void refresh(false);
       } else {
         setNotice("信息流已是最新状态");
@@ -101,13 +115,18 @@ export default function Dashboard() {
       active = false;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void loadFeed(query, sourceId).catch((error) => {
-        setFatalError(error instanceof Error ? error.message : "筛选失败");
-      });
+      void requestFeed(query, sourceId)
+        .then((payload) => {
+          setFeed(payload);
+          setFatalError(null);
+        })
+        .catch((error) => {
+          setFatalError(error instanceof Error ? error.message : "筛选失败");
+        });
     }, 250);
     return () => window.clearTimeout(timer);
   }, [query, sourceId]);
