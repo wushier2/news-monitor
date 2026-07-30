@@ -42,14 +42,16 @@ describe("feed and refresh API contracts", () => {
     expect(response.status).toBe(400);
   });
 
-  it("caps the feed limit at 100 and disables response caching", async () => {
+  it("uses the default page size and disables response caching", async () => {
     const response = await GET(new Request("https://example.test/api/feed?limit=999"));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(fakes.listFeed).toHaveBeenCalledWith(fakes.db, {
       query: undefined,
       sourceId: undefined,
-      limit: 100,
+      limit: 50,
+      page: 1,
+      pageSize: 50,
     });
   });
 
@@ -66,7 +68,9 @@ describe("feed and refresh API contracts", () => {
       expect(fakes.listFeed).toHaveBeenCalledWith(fakes.db, {
         query: undefined,
         sourceId: undefined,
-        limit: 60,
+        limit: 50,
+        page: 1,
+        pageSize: 50,
         fromMs: Date.parse("2026-07-30T09:30:00+08:00"),
         toExclusiveMs: Date.parse("2026-07-30T11:21:00+08:00"),
       });
