@@ -18,7 +18,9 @@ export async function GET(request: Request) {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "无法读取信息流";
-    const status = /搜索词|未知来源/.test(message) ? 400 : 500;
+    const status = /搜索词|未知来源|时间|最近 7 天|未来/.test(message)
+      ? 400
+      : 500;
     return Response.json({ error: message }, { status });
   }
 }

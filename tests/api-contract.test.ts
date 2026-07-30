@@ -53,6 +53,38 @@ describe("feed and refresh API contracts", () => {
     });
   });
 
+  it("passes valid time bounds to the repository", async () => {
+    const from = encodeURIComponent("2026-07-30T09:30:00+08:00");
+    const to = encodeURIComponent("2026-07-30T11:20:00+08:00");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-30T03:45:30.000Z"));
+    try {
+      const response = await GET(new Request(
+        `https://example.test/api/feed?from=${from}&to=${to}`,
+      ));
+      expect(response.status).toBe(200);
+      expect(fakes.listFeed).toHaveBeenCalledWith(fakes.db, {
+        query: undefined,
+        sourceId: undefined,
+        limit: 60,
+        fromMs: Date.parse("2026-07-30T09:30:00+08:00"),
+        toExclusiveMs: Date.parse("2026-07-30T11:21:00+08:00"),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns 400 and skips the repository for an invalid time range", async () => {
+    const from = encodeURIComponent("2026-07-30T11:30:00+08:00");
+    const to = encodeURIComponent("2026-07-30T11:20:00+08:00");
+    const response = await GET(new Request(
+      `https://example.test/api/feed?from=${from}&to=${to}`,
+    ));
+    expect(response.status).toBe(400);
+    expect(fakes.listFeed).not.toHaveBeenCalled();
+  });
+
   it("returns 202 without ingestion when data is still fresh", async () => {
     fakes.getLastSuccessfulIngestion.mockResolvedValue(new Date());
 
