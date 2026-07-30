@@ -557,7 +557,7 @@ Delete `app/_sites-preview`, remove its imports, remove `react-loading-skeleton`
 
 - [ ] **Step 5: Create one site-specific social preview**
 
-After the final headline, palette, and typography are stable, run exactly one image generation request for a landscape social card containing the finished “舆情雷达” identity. Inspect all rendered text. Save a valid result as `public/og.png`; otherwise omit `og:image`.
+After the final headline, palette, and typography are stable, run exactly one image generation request for a landscape social card containing the finished “G端资讯监控” identity. Inspect all rendered text. Save a valid result as `public/og.png`; otherwise omit `og:image`.
 
 - [ ] **Step 6: Run tests and commit**
 

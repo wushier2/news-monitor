@@ -8,17 +8,17 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
   return {
-    title: "舆情雷达",
+    title: "G端资讯监控",
     description: "聚合 36Kr、界面新闻和财联社四个公开频道的七天舆情信息流。",
     metadataBase: new URL(origin),
     openGraph: {
-      title: "舆情雷达",
+      title: "G端资讯监控",
       description: "四个公开来源 · 七天信息流",
       images: [{ url: `${origin}/og.png`, width: 1200, height: 630 }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "舆情雷达",
+      title: "G端资讯监控",
       description: "四个公开来源 · 七天信息流",
       images: [`${origin}/og.png`],
     },

@@ -147,7 +147,7 @@ export default function Dashboard() {
       <header className="masthead">
         <div className="brand-block">
           <span className="eyebrow">PUBLIC SIGNAL DESK</span>
-          <h1>舆情雷达</h1>
+          <h1>G端资讯监控</h1>
         </div>
         <div className="health-line" aria-label="采集状态">
           <span className={`pulse ${unhealthy.length ? "pulse-warn" : ""}`} />
