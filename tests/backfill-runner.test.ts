@@ -55,7 +55,9 @@ describe("backfill runner", () => {
     expect(first.run.sources).toHaveLength(4);
     expect(Date.parse(first.run.windowEnd) - Date.parse(first.run.windowStart))
       .toBe(86_400_000);
-    expect(second).toEqual({ run: first.run, reused: true });
+    expect(first.completion).toBeInstanceOf(Promise);
+    expect(second).toMatchObject({ run: first.run, reused: true });
+    expect(second.completion).toBe(first.completion);
     expect(runSources).toHaveBeenCalledTimes(1);
     expect(isBackfillActive()).toBe(true);
 

@@ -7,6 +7,7 @@ import {
 } from "../../../lib/backfill/runner";
 import { SOURCE_IDS } from "../../../lib/sources";
 import type { SourceId } from "../../../lib/domain";
+import { waitUntil } from "cloudflare:workers";
 
 function parseInput(text: string): { sourceId?: SourceId } {
   if (!text.trim()) return {};
@@ -37,7 +38,8 @@ export async function POST(request: Request) {
     const db = getD1();
     await ensureSchema(db);
     const input = parseInput(await request.text());
-    const result = await startBackfill(db, input);
+    const { completion, ...result } = await startBackfill(db, input);
+    waitUntil(completion);
     return Response.json(result, {
       status: 202,
       headers: { "cache-control": "no-store" },

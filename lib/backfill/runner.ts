@@ -27,6 +27,10 @@ export interface BackfillRunnerDependencies {
   clock?: () => Date;
 }
 
+export interface StartedBackfillResponse extends StartBackfillResponse {
+  completion: Promise<void>;
+}
+
 function withStartLock<T>(operation: () => Promise<T>): Promise<T> {
   const result = startLock.then(operation, operation);
   startLock = result.then(() => undefined, () => undefined);
@@ -57,12 +61,16 @@ export function startBackfill(
   input: StartBackfillInput = {},
   requestedAt: Date = new Date(),
   dependencies: BackfillRunnerDependencies = {},
-): Promise<StartBackfillResponse> {
+): Promise<StartedBackfillResponse> {
   return withStartLock(async () => {
     const requestedSourceId = validateSourceId(input.sourceId);
     const running = await findRunningBackfill(db);
     if (running && activeTasks.has(running.id)) {
-      return { run: running, reused: true };
+      return {
+        run: running,
+        reused: true,
+        completion: activeTasks.get(running.id)!,
+      };
     }
     if (running) await interruptRunningBackfills(db, requestedAt);
 
@@ -123,6 +131,6 @@ export function startBackfill(
       });
     activeTasks.set(run.id, task);
 
-    return { run, reused: false };
+    return { run, reused: false, completion: task };
   });
 }

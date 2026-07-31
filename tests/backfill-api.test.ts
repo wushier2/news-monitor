@@ -11,6 +11,7 @@ const fakeRun = {
   createdAt: "2026-07-31T10:00:00.000Z",
   sources: [],
 } as const;
+const completion = Promise.resolve();
 
 const fakes = vi.hoisted(() => ({
   db: {} as D1Database,
@@ -19,6 +20,7 @@ const fakes = vi.hoisted(() => ({
   getLatestBackfillRun: vi.fn(),
   reconcileBackfillState: vi.fn(),
   startBackfill: vi.fn(),
+  waitUntil: vi.fn(),
 }));
 
 vi.mock("../db", () => ({ getD1: () => fakes.db }));
@@ -31,6 +33,7 @@ vi.mock("../lib/backfill/runner", () => ({
   reconcileBackfillState: fakes.reconcileBackfillState,
   startBackfill: fakes.startBackfill,
 }));
+vi.mock("cloudflare:workers", () => ({ waitUntil: fakes.waitUntil }));
 
 import { GET as getLatest, POST } from "../app/api/backfill/route";
 import { GET as getById } from "../app/api/backfill/[runId]/route";
@@ -40,7 +43,11 @@ describe("backfill API", () => {
     vi.clearAllMocks();
     fakes.ensureSchema.mockResolvedValue(undefined);
     fakes.reconcileBackfillState.mockResolvedValue(0);
-    fakes.startBackfill.mockResolvedValue({ run: fakeRun, reused: false });
+    fakes.startBackfill.mockResolvedValue({
+      run: fakeRun,
+      reused: false,
+      completion,
+    });
     fakes.getLatestBackfillRun.mockResolvedValue(fakeRun);
     fakes.getBackfillRun.mockResolvedValue(fakeRun);
   });
@@ -52,6 +59,7 @@ describe("backfill API", () => {
     expect(response.status).toBe(202);
     expect(fakes.startBackfill).toHaveBeenCalledWith(fakes.db, {});
     expect(await response.json()).toEqual({ run: fakeRun, reused: false });
+    expect(fakes.waitUntil).toHaveBeenCalledWith(completion);
   });
 
   it("accepts a supported single source", async () => {
