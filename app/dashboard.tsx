@@ -208,7 +208,9 @@ export default function Dashboard() {
         setNotice("刷新后读取第 1 页失败");
         return;
       }
-      if (payload.status === "skipped") {
+      if (payload.status === "busy") {
+        setNotice("补采进行中，本轮普通采集已跳过");
+      } else if (payload.status === "skipped") {
         setNotice(`数据仍是最新状态，${payload.retryAfterSeconds ?? 1} 秒后可再次刷新`);
       } else if (payload.status === "partial") {
         setNotice("刷新完成，部分来源暂时失败");

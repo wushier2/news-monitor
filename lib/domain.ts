@@ -58,7 +58,7 @@ export interface FeedResponse {
 }
 
 export interface RefreshResponse {
-  status: "success" | "partial" | "skipped";
+  status: "success" | "partial" | "skipped" | "busy";
   refreshedAt: string;
   retryAfterSeconds?: number;
 }

@@ -6,6 +6,7 @@ const fakes = vi.hoisted(() => ({
   ensureSchema: vi.fn(),
   getLastSuccessfulIngestion: vi.fn(),
   getSourceStatuses: vi.fn(),
+  isBackfillActive: vi.fn(),
   listFeedPage: vi.fn(),
   runIngestion: vi.fn(),
 }));
@@ -19,6 +20,9 @@ vi.mock("../lib/repository", () => ({
   listFeedPage: fakes.listFeedPage,
 }));
 vi.mock("../lib/ingestion", () => ({ runIngestion: fakes.runIngestion }));
+vi.mock("../lib/backfill/runner", () => ({
+  isBackfillActive: fakes.isBackfillActive,
+}));
 
 import { GET } from "../app/api/feed/route";
 import { POST } from "../app/api/refresh/route";
@@ -30,6 +34,7 @@ describe("feed and refresh API contracts", () => {
     fakes.listFeedPage.mockResolvedValue({ items: [], totalItems: 0 });
     fakes.countItemsInRange.mockResolvedValue(0);
     fakes.getSourceStatuses.mockResolvedValue([]);
+    fakes.isBackfillActive.mockReturnValue(false);
   });
 
   it("returns 400 for an unknown feed source", async () => {
@@ -140,6 +145,15 @@ describe("feed and refresh API contracts", () => {
 
     expect(response.status).toBe(202);
     expect(body.status).toBe("skipped");
+    expect(fakes.runIngestion).not.toHaveBeenCalled();
+  });
+
+  it("skips ordinary ingestion while backfill is active", async () => {
+    fakes.isBackfillActive.mockReturnValue(true);
+    const response = await POST();
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({ status: "busy" });
+    expect(fakes.getLastSuccessfulIngestion).not.toHaveBeenCalled();
     expect(fakes.runIngestion).not.toHaveBeenCalled();
   });
 
