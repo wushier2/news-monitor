@@ -83,8 +83,7 @@ export function startBackfill(
     const runSources = dependencies.runSources ?? runBackfillSources;
     const pageWait = dependencies.waitBetweenPages ?? waitBetweenPages;
 
-    let task!: Promise<void>;
-    task = Promise.resolve()
+    const task = Promise.resolve()
       .then(async () => {
         await runSources({
           db,
@@ -120,7 +119,7 @@ export function startBackfill(
         await finishBackfillRun(db, run.id, "failed", clock());
       })
       .finally(() => {
-        if (activeTasks.get(run.id) === task) activeTasks.delete(run.id);
+        activeTasks.delete(run.id);
       });
     activeTasks.set(run.id, task);
 

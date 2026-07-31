@@ -154,8 +154,13 @@ button:focus-visible, input:focus-visible, a:focus-visible {
   color: #a3412b;
   font-size: 11px;
 }
-.refresh-button {
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
+}
+.refresh-button, .backfill-button {
   min-width: 92px;
   padding: 9px 13px;
   border: 0;
@@ -165,7 +170,34 @@ button:focus-visible, input:focus-visible, a:focus-visible {
   font-size: 12px;
   font-weight: 750;
 }
-.refresh-button:disabled { cursor: wait; opacity: .65; }
+.backfill-button {
+  min-width: 126px;
+  color: #fff;
+  background: var(--forest);
+}
+.refresh-button { color: #273128; background: var(--amber); }
+.refresh-button:disabled, .backfill-button:disabled { cursor: wait; opacity: .65; }
+.backfill-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 18px;
+  color: #28433a;
+  background: #edf4ef;
+  border-bottom: 1px solid #cddbd2;
+}
+.backfill-confirm strong { font-size: 13px; }
+.backfill-confirm p { margin: 5px 0 0; color: #64736a; font-size: 11px; }
+.backfill-confirm-actions { display: flex; flex: 0 0 auto; gap: 8px; }
+.backfill-confirm-actions button {
+  height: 34px;
+  padding: 0 13px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.backfill-confirm-button { color: #fff; background: var(--forest); border: 1px solid var(--forest); }
+.backfill-cancel-button { color: #56645b; background: #fff; border: 1px solid #cdd7d0; }
 .source-alert {
   display: flex;
   gap: 10px;
@@ -175,6 +207,65 @@ button:focus-visible, input:focus-visible, a:focus-visible {
   border-bottom: 1px solid #f0ddb5;
   font-size: 12px;
 }
+.backfill-panel {
+  padding: 18px 24px 20px;
+  background: #fbfcf9;
+  border-bottom: 1px solid var(--line);
+}
+.backfill-panel-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 13px;
+}
+.backfill-panel-heading h2 {
+  margin: 4px 0 0;
+  font-family: "STSong", "SimSun", serif;
+  font-size: 22px;
+}
+.backfill-overview { display: grid; gap: 3px; text-align: right; }
+.backfill-overview strong { color: var(--forest); font-size: 13px; }
+.backfill-overview span { color: var(--muted); font-size: 10px; }
+.backfill-error {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  color: #973c2b;
+  background: #fff0ec;
+  border-radius: 6px;
+  font-size: 11px;
+}
+.backfill-source-list { border: 1px solid #dde4dd; border-radius: 8px; overflow: hidden; }
+.backfill-source-row {
+  display: grid;
+  grid-template-columns: 150px 92px minmax(250px, .8fr) minmax(220px, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 11px 13px;
+  background: #fff;
+  border-bottom: 1px solid #e5e9e4;
+}
+.backfill-source-row:last-child { border-bottom: 0; }
+.backfill-source-name { display: grid; gap: 2px; }
+.backfill-source-name strong { color: var(--forest); font-size: 12px; }
+.backfill-source-name span { color: var(--muted); font-size: 10px; }
+.backfill-status {
+  width: max-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 750;
+}
+.backfill-status-pending { color: #65716a; background: #eef1ee; }
+.backfill-status-running { color: #77520e; background: #fff2d8; }
+.backfill-status-complete { color: #176041; background: #e3f4e9; }
+.backfill-status-partial { color: #8a5b08; background: #fff0cf; }
+.backfill-status-failed { color: #9a3827; background: #ffe7e1; }
+.backfill-status-interrupted { color: #685676; background: #f0e9f5; }
+.backfill-metrics { display: flex; align-items: center; gap: 13px; color: #66736b; font-size: 10px; }
+.backfill-metrics strong { color: var(--ink); }
+.backfill-coverage { display: grid; gap: 3px; color: #65716a; font-size: 10px; }
+.backfill-coverage small { color: #a3412b; line-height: 1.35; }
 .feed-heading {
   display: flex;
   justify-content: space-between;
@@ -301,7 +392,24 @@ footer {
   .time-range-editor input { width: 100%; }
   .time-range-actions { justify-content: flex-end; }
   .time-range-error { margin: 0; }
-  .refresh-button { margin-left: 0; }
+  .toolbar-actions {
+    order: 4;
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+  .backfill-confirm { align-items: flex-start; padding: 12px; }
+  .backfill-confirm-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .backfill-panel { padding: 16px 12px; }
+  .backfill-panel-heading { display: grid; align-items: start; }
+  .backfill-overview { text-align: left; }
+  .backfill-source-row {
+    grid-template-columns: 1fr auto;
+    gap: 9px 12px;
+  }
+  .backfill-metrics, .backfill-coverage { grid-column: 1 / -1; }
+  .backfill-metrics { flex-wrap: wrap; }
   .feed-heading { padding: 20px 16px 12px; }
   .feed-heading p { display: none; }
   .feed-item { grid-template-columns: 82px minmax(0, 1fr); gap: 12px; padding: 16px; }

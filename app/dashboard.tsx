@@ -20,6 +20,14 @@ import {
   getBeijingInputBounds,
   validateBeijingLocalRange,
 } from "../lib/time-range";
+import type {
+  BackfillRun,
+  StartBackfillResponse,
+} from "../lib/backfill/types";
+import {
+  backfillStatusLabel,
+  backfillSummary,
+} from "../lib/backfill/presentation";
 
 const PAGE_SIZE = 50;
 const EMPTY_PAGINATION: PaginationMeta = {
@@ -97,6 +105,10 @@ export default function Dashboard() {
   const [page, setPage] = useState(1);
   const [pageLoading, setPageLoading] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [backfillRun, setBackfillRun] = useState<BackfillRun | null>(null);
+  const [backfillStarting, setBackfillStarting] = useState(false);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
+  const [backfillConfirmOpen, setBackfillConfirmOpen] = useState(false);
   const pickerBounds = useMemo(() => getBeijingInputBounds(), []);
   const refreshingRef = useRef(false);
   const filtersRef = useRef({ query, sourceId, appliedRange });
@@ -104,6 +116,10 @@ export default function Dashboard() {
   const filterEffectReadyRef = useRef(false);
   const mountedRef = useRef(true);
   const feedHeadingRef = useRef<HTMLElement | null>(null);
+  const observedRunningBackfillsRef = useRef(new Set<number>());
+  const runningBackfillId = backfillRun?.status === "running"
+    ? backfillRun.id
+    : null;
 
   useEffect(() => {
     filtersRef.current = { query, sourceId, appliedRange };
@@ -270,6 +286,78 @@ export default function Dashboard() {
     return () => window.clearTimeout(timer);
   }, [query, sourceId, appliedRange, loadFeed]);
 
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/backfill", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as {
+          run: BackfillRun | null;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error ?? "无法读取补采任务");
+        if (!active) return;
+        if (payload.run?.status === "running") {
+          observedRunningBackfillsRef.current.add(payload.run.id);
+        }
+        setBackfillRun(payload.run);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setBackfillError(
+          error instanceof Error ? error.message : "无法读取补采任务",
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (runningBackfillId === null) return;
+    observedRunningBackfillsRef.current.add(runningBackfillId);
+    let active = true;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/backfill/${runningBackfillId}`, {
+          cache: "no-store",
+        });
+        const payload = await response.json() as {
+          run?: BackfillRun;
+          error?: string;
+        };
+        if (!response.ok || !payload.run) {
+          throw new Error(payload.error ?? "无法读取补采进度");
+        }
+        if (!active) return;
+        setBackfillRun(payload.run);
+        setBackfillError(null);
+      } catch (error) {
+        if (!active) return;
+        setBackfillError(
+          error instanceof Error ? error.message : "无法读取补采进度",
+        );
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 1_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [runningBackfillId]);
+
+  useEffect(() => {
+    if (!backfillRun || backfillRun.status === "running") return;
+    if (!observedRunningBackfillsRef.current.delete(backfillRun.id)) return;
+    const currentFilters = filtersRef.current;
+    void loadFeed(
+      currentFilters.query,
+      currentFilters.sourceId,
+      currentFilters.appliedRange,
+      1,
+      "refresh",
+    );
+  }, [backfillRun, loadFeed]);
+
   const unhealthy = feed.sources.filter((source) => source.status === "error");
   const healthyCount = feed.sources.filter((source) => source.status === "ok").length;
   const latestTime = useMemo(() => {
@@ -297,6 +385,32 @@ export default function Dashboard() {
       targetPage,
       "page",
     );
+  }
+
+  async function startBackfill() {
+    setBackfillConfirmOpen(false);
+    setBackfillStarting(true);
+    setBackfillError(null);
+    try {
+      const response = await fetch("/api/backfill", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      const payload = await response.json() as StartBackfillResponse & {
+        error?: string;
+      };
+      if (!response.ok) throw new Error(payload.error ?? "无法启动补采");
+      if (payload.run.status === "running") {
+        observedRunningBackfillsRef.current.add(payload.run.id);
+      }
+      setBackfillRun(payload.run);
+      setNotice(payload.reused ? "已恢复正在进行的补采任务" : "补采任务已启动");
+    } catch (error) {
+      setBackfillError(error instanceof Error ? error.message : "无法启动补采");
+    } finally {
+      setBackfillStarting(false);
+    }
   }
 
   return (
@@ -346,9 +460,22 @@ export default function Dashboard() {
         >
           {appliedRange ? formatTimeRangeLabel(appliedRange) : "时间范围"}
         </button>
-        <button className="refresh-button" disabled={refreshing} onClick={() => void refresh(true)}>
-          {refreshing ? "刷新中…" : "立即刷新"}
-        </button>
+        <div className="toolbar-actions">
+          <button
+            className="backfill-button"
+            disabled={backfillStarting || backfillRun?.status === "running"}
+            onClick={() => setBackfillConfirmOpen(true)}
+          >
+            {backfillStarting
+              ? "启动中…"
+              : backfillRun?.status === "running"
+                ? "补采进行中…"
+                : "补采过去24小时"}
+          </button>
+          <button className="refresh-button" disabled={refreshing} onClick={() => void refresh(true)}>
+            {refreshing ? "刷新中…" : "立即刷新"}
+          </button>
+        </div>
       </section>
 
       {timeEditorOpen && (
@@ -387,11 +514,79 @@ export default function Dashboard() {
         </section>
       )}
 
+      {backfillConfirmOpen && (
+        <section className="backfill-confirm" aria-labelledby="backfill-confirm-title">
+          <div>
+            <strong id="backfill-confirm-title">确认补采过去 24 小时的信息？</strong>
+            <p>将依次翻页采集四个来源，并在后台持续更新进度。单个来源失败不会中断其他来源。</p>
+          </div>
+          <div className="backfill-confirm-actions">
+            <button className="backfill-confirm-button" onClick={() => void startBackfill()}>
+              确认补采
+            </button>
+            <button className="backfill-cancel-button" onClick={() => setBackfillConfirmOpen(false)}>
+              取消
+            </button>
+          </div>
+        </section>
+      )}
+
       {unhealthy.length > 0 && (
         <aside className="source-alert" role="status">
           <strong>{unhealthy.map((source) => SOURCES.find((item) => item.id === source.sourceId)?.channelName).join("、")}</strong>
           <span>暂时采集失败，现有记录仍可浏览；下一轮会自动重试。</span>
         </aside>
+      )}
+
+      {(backfillRun || backfillError) && (
+        <section className="backfill-panel" aria-live="polite">
+          <div className="backfill-panel-heading">
+            <div>
+              <span className="section-kicker">HISTORICAL COVERAGE</span>
+              <h2>过去 24 小时补充采集</h2>
+            </div>
+            {backfillRun && (
+              <div className="backfill-overview">
+                <strong>{backfillSummary(backfillRun)}</strong>
+                <span>
+                  {formatTime(backfillRun.windowStart)} 至 {formatTime(backfillRun.windowEnd)}
+                </span>
+              </div>
+            )}
+          </div>
+          {backfillError && <p className="backfill-error" role="alert">{backfillError}</p>}
+          {backfillRun && (
+            <div className="backfill-source-list">
+              {backfillRun.sources.map((source) => {
+                const definition = SOURCES.find((item) => item.id === source.sourceId);
+                const showError = ["partial", "failed", "interrupted"].includes(source.status)
+                  && source.error;
+                return (
+                  <article className="backfill-source-row" key={source.sourceId}>
+                    <div className="backfill-source-name">
+                      <strong>{definition?.sourceName ?? source.sourceId}</strong>
+                      <span>{definition?.channelName}</span>
+                    </div>
+                    <span className={`backfill-status backfill-status-${source.status}`}>
+                      {backfillStatusLabel(source.status)}
+                    </span>
+                    <div className="backfill-metrics">
+                      <span>{source.pagesFetched} 页</span>
+                      <span>抓取 {source.itemsFetched} 条</span>
+                      <strong>新增 {source.itemsInserted} 条</strong>
+                    </div>
+                    <div className="backfill-coverage">
+                      {source.earliestCoveredAt
+                        ? `已覆盖至 ${formatTime(source.earliestCoveredAt)}`
+                        : "尚无有效时间覆盖"}
+                      {showError && <small>{source.error}</small>}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
       )}
 
       <section ref={feedHeadingRef} className="feed-heading">

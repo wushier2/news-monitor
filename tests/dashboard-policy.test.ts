@@ -5,6 +5,12 @@ import {
   formatTimeRangeLabel,
   getBeijingInputBounds,
 } from "../lib/time-range";
+import {
+  BACKFILL_STATUS_LABELS,
+  backfillStatusLabel,
+  backfillSummary,
+} from "../lib/backfill/presentation";
+import type { BackfillRun } from "../lib/backfill/types";
 
 describe("dashboard refresh policy", () => {
   const now = Date.parse("2026-07-29T10:00:00.000Z");
@@ -47,5 +53,31 @@ describe("dashboard refresh policy", () => {
       "ellipsis-right",
       100,
     ]);
+  });
+
+  it("provides a Chinese label for every backfill source status", () => {
+    expect(Object.keys(BACKFILL_STATUS_LABELS)).toEqual([
+      "pending",
+      "running",
+      "complete",
+      "partial",
+      "failed",
+      "interrupted",
+    ]);
+    expect(backfillStatusLabel("complete")).toBe("完整");
+    expect(backfillStatusLabel("partial")).toBe("部分完成");
+  });
+
+  it("summarizes inserted totals across all sources", () => {
+    const run = {
+      status: "complete",
+      sources: [
+        { itemsInserted: 12 },
+        { itemsInserted: 8 },
+      ],
+    } as BackfillRun;
+    expect(backfillSummary(run)).toBe("补采结束，共新增 20 条");
+    expect(backfillSummary({ ...run, status: "running" }))
+      .toBe("补采进行中，已新增 20 条");
   });
 });
