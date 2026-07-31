@@ -19,6 +19,11 @@ export interface FeedPage {
   totalItems: number;
 }
 
+export interface UpsertStats {
+  inserted: number;
+  existing: number;
+}
+
 function iso(value: unknown): string | null {
   return typeof value === "number" ? new Date(value).toISOString() : null;
 }
@@ -66,21 +71,24 @@ function feedItem(row: D1Row): FeedItem {
   };
 }
 
-export async function upsertItems(db: D1Database, incoming: NormalizedItem[], now: Date): Promise<number> {
-  if (!incoming.length) return 0;
-  const statements = incoming.map((item) => {
-    const dedupeKey = buildDedupeKey(item);
-    return db.prepare(`
+export async function upsertItemsWithStats(
+  db: D1Database,
+  incoming: NormalizedItem[],
+  now: Date,
+): Promise<UpsertStats> {
+  const unique = [...new Map(incoming.map((item) => [
+    buildDedupeKey(item),
+    item,
+  ])).entries()];
+  if (!unique.length) return { inserted: 0, existing: 0 };
+
+  const insertResults = await db.batch(unique.map(([dedupeKey, item]) => (
+    db.prepare(`
       INSERT INTO items (
         dedupe_key, source_id, source_name, channel_name, title, summary, url,
         published_at, first_seen_at, last_seen_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(dedupe_key) DO UPDATE SET
-        title = excluded.title,
-        summary = excluded.summary,
-        url = excluded.url,
-        published_at = COALESCE(excluded.published_at, items.published_at),
-        last_seen_at = excluded.last_seen_at
+      ON CONFLICT(dedupe_key) DO NOTHING
     `).bind(
       dedupeKey,
       item.sourceId,
@@ -92,9 +100,39 @@ export async function upsertItems(db: D1Database, incoming: NormalizedItem[], no
       item.publishedAt ? Date.parse(item.publishedAt) : null,
       now.getTime(),
       now.getTime(),
-    );
-  });
-  await db.batch(statements);
+    )
+  )));
+  const inserted = insertResults.reduce(
+    (sum, result) => sum + Number(result.meta.changes ?? 0),
+    0,
+  );
+
+  await db.batch(unique.map(([dedupeKey, item]) => db.prepare(`
+    UPDATE items SET
+      title = ?,
+      summary = ?,
+      url = ?,
+      published_at = COALESCE(?, published_at),
+      last_seen_at = ?
+    WHERE dedupe_key = ?
+  `).bind(
+    item.title,
+    item.summary,
+    item.url,
+    item.publishedAt ? Date.parse(item.publishedAt) : null,
+    now.getTime(),
+    dedupeKey,
+  )));
+
+  return { inserted, existing: unique.length - inserted };
+}
+
+export async function upsertItems(
+  db: D1Database,
+  incoming: NormalizedItem[],
+  now: Date,
+): Promise<number> {
+  await upsertItemsWithStats(db, incoming, now);
   return incoming.length;
 }
 
