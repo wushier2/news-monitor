@@ -1,6 +1,6 @@
 import { buildClsSignedUrl } from "../../fetch-source";
 import { parseClsCandidates, type ClsArticle } from "../../parsers/cls";
-import { fetchWithRetry, type Fetcher } from "../http";
+import { fetchWithRetry, type Fetcher, type Sleep } from "../http";
 import type { BackfillAdapter } from "../types";
 
 const USER_AGENT = "Mozilla/5.0 (compatible; PublicOpinionMonitor/1.0; +https://openai.com)";
@@ -26,7 +26,7 @@ function lastTime(candidates: ClsArticle[]): number | null {
 }
 
 export function createClsBackfillAdapter(
-  dependencies: { fetcher?: Fetcher } = {},
+  dependencies: { fetcher?: Fetcher; sleep?: Sleep } = {},
 ): BackfillAdapter {
   return {
     sourceId: "cls-headline",
@@ -39,17 +39,19 @@ export function createClsBackfillAdapter(
           rn: "20",
           id: "1000",
         });
-      const response = await fetchWithRetry(url, {
+      const payload = await fetchWithRetry(url, {
         headers: {
           accept: "application/json",
           referer: "https://www.cls.cn/depth?id=1000",
           "user-agent": USER_AGENT,
         },
-      }, { fetcher: dependencies.fetcher });
-      const payload = await response.json() as {
+      }, {
+        fetcher: dependencies.fetcher,
+        sleep: dependencies.sleep,
+      }, (response) => response.json() as Promise<{
         errno?: number;
         data?: { depth_list?: ClsArticle[] } | ClsArticle[];
-      };
+      }>);
       if (payload.errno !== 0) {
         throw new Error(`CLS API error: ${String(payload.errno)}`);
       }

@@ -2,6 +2,21 @@ import { describe, expect, it, vi } from "vitest";
 import { fetchWithRetry, waitBetweenPages } from "../lib/backfill/http";
 
 describe("backfill HTTP policy", () => {
+  it("retries a transient network failure and then succeeds", async () => {
+    const fetcher = vi.fn()
+      .mockRejectedValueOnce(new Error("Network connection lost."))
+      .mockResolvedValueOnce(new Response("ok"));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    expect(await fetchWithRetry(
+      "https://example.test",
+      {},
+      { fetcher, sleep },
+    )).toMatchObject({ status: 200 });
+    expect(sleep).toHaveBeenCalledWith(1_000);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it("retries 429 using Retry-After and then succeeds", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response("busy", {

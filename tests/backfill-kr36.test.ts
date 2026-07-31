@@ -66,6 +66,73 @@ describe("36Kr backfill adapter", () => {
     });
   });
 
+  it("retries when reading a gateway response body loses connection", async () => {
+    const brokenResponse = {
+      ok: true,
+      status: 200,
+      json: vi.fn().mockRejectedValue(new Error("Network connection lost.")),
+    } as unknown as Response;
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(brokenResponse)
+      .mockResolvedValueOnce(new Response(nextJson));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const adapter = create36KrBackfillAdapter({ fetcher, sleep });
+
+    const page = await adapter.fetchPage(JSON.stringify({
+      nonce: "fixture-nonce",
+      pageCallback: "fixture-callback",
+    }));
+
+    expect(page.items).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(1_000);
+  });
+
+  it("falls back to HTTP after repeated HTTPS connection loss", async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).startsWith("https://")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockRejectedValue(new Error("Network connection lost.")),
+        } as unknown as Response;
+      }
+      return new Response(nextJson);
+    });
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const adapter = create36KrBackfillAdapter({ fetcher, sleep });
+
+    const page = await adapter.fetchPage(JSON.stringify({
+      nonce: "fixture-nonce",
+      pageCallback: "fixture-callback",
+    }));
+
+    expect(page.items).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher.mock.calls.slice(0, 3).every(
+      ([url]) => String(url).startsWith("https://gateway.36kr.com/"),
+    )).toBe(true);
+    expect(String(fetcher.mock.calls[3]?.[0])).toMatch(
+      /^http:\/\/gateway\.36kr\.com\//,
+    );
+  });
+
+  it("does not downgrade a permanent HTTPS error", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response("forbidden", {
+      status: 403,
+    }));
+    const adapter = create36KrBackfillAdapter({ fetcher });
+
+    await expect(adapter.fetchPage(JSON.stringify({
+      nonce: "fixture-nonce",
+      pageCallback: "fixture-callback",
+    }))).rejects.toThrow("HTTP 403");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(String(fetcher.mock.calls[0]?.[0])).toMatch(
+      /^https:\/\/gateway\.36kr\.com\//,
+    );
+  });
+
   it("reports exhaustion when no next callback is available", async () => {
     const terminal = JSON.stringify({
       data: { itemList: [], pageCallback: null, hasNextPage: 0 },

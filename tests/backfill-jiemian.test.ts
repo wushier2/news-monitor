@@ -56,6 +56,29 @@ describe("Jiemian backfill adapter", () => {
     });
   });
 
+  it("retries a transient API code 1 response and then succeeds", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        code: "1",
+        message: "temporary busy",
+      })))
+      .mockResolvedValueOnce(new Response(nextJson));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const adapter = createJiemianBackfillAdapter("jiemian-current-affairs", {
+      fetcher,
+      sleep,
+    });
+
+    const result = await adapter.fetchPage(JSON.stringify({
+      startTime: 1_785_484_724,
+      page: 2,
+    }));
+
+    expect(result.items).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(1_000);
+  });
+
   it("uses hideBtn as explicit exhaustion", async () => {
     const terminal = JSON.stringify({
       code: "0",

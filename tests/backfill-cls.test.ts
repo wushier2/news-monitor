@@ -45,6 +45,25 @@ describe("CLS backfill adapter", () => {
     });
   });
 
+  it("retries when reading a response body loses connection", async () => {
+    const brokenResponse = {
+      ok: true,
+      status: 200,
+      json: vi.fn().mockRejectedValue(new Error("Network connection lost.")),
+    } as unknown as Response;
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(brokenResponse)
+      .mockResolvedValueOnce(new Response(firstJson));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const adapter = createClsBackfillAdapter({ fetcher, sleep });
+
+    const result = await adapter.fetchPage(null);
+
+    expect(result.items).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(1_000);
+  });
+
   it("treats only an empty paged response as exhaustion", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ errno: 0, data: [] }),

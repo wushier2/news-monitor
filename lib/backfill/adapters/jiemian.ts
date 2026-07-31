@@ -5,7 +5,7 @@ import {
   type JiemianCandidate,
   type JiemianSourceId,
 } from "../../parsers/jiemian";
-import { fetchWithRetry, type Fetcher } from "../http";
+import { fetchWithRetry, type Fetcher, type Sleep } from "../http";
 import type { BackfillAdapter } from "../types";
 
 const API_URL = "https://papi.jiemian.com/page/api/kuaixun/getlistmore";
@@ -29,6 +29,20 @@ interface JiemianCursor {
   page: number;
 }
 
+interface JiemianPayload {
+  code?: string | number;
+  message?: string;
+  result?: { hideBtn?: boolean; list?: JiemianCandidate[] };
+}
+
+function apiError(payload: JiemianPayload): Error {
+  const message = payload.message?.trim();
+  return new Error(
+    `Jiemian API error: ${String(payload.code)}`
+      + (message ? ` (${message})` : ""),
+  );
+}
+
 function readCursor(cursor: string): JiemianCursor {
   const value = JSON.parse(cursor) as Partial<JiemianCursor>;
   if (!Number.isFinite(value.startTime) || !Number.isInteger(value.page)) {
@@ -47,7 +61,7 @@ function lastPublishTime(candidates: JiemianCandidate[]): number | null {
 
 export function createJiemianBackfillAdapter(
   sourceId: JiemianSourceId,
-  dependencies: { fetcher?: Fetcher } = {},
+  dependencies: { fetcher?: Fetcher; sleep?: Sleep } = {},
 ): BackfillAdapter {
   const channel = CHANNELS[sourceId];
   const firstPageUrl = `https://www.jiemian.com/lists/${channel.cid}.html`;
@@ -55,13 +69,15 @@ export function createJiemianBackfillAdapter(
     sourceId,
     async fetchPage(cursor) {
       if (cursor === null) {
-        const response = await fetchWithRetry(firstPageUrl, {
+        const html = await fetchWithRetry(firstPageUrl, {
           headers: {
             accept: "text/html,application/xhtml+xml",
             "user-agent": USER_AGENT,
           },
-        }, { fetcher: dependencies.fetcher });
-        const html = await response.text();
+        }, {
+          fetcher: dependencies.fetcher,
+          sleep: dependencies.sleep,
+        }, (response) => response.text());
         const $ = load(html);
         const button = $("#load-list").first();
         const lastTime = Number(
@@ -85,19 +101,22 @@ export function createJiemianBackfillAdapter(
       const url = `${API_URL}?cid=${channel.cid}`
         + `&start_time=${current.startTime}&page=${current.page}`
         + `&tagid=${channel.tagid}`;
-      const response = await fetchWithRetry(url, {
+      const payload = await fetchWithRetry(url, {
         headers: {
           accept: "application/json",
           referer: firstPageUrl,
           "user-agent": USER_AGENT,
         },
-      }, { fetcher: dependencies.fetcher });
-      const payload = await response.json() as {
-        code?: string | number;
-        result?: { hideBtn?: boolean; list?: JiemianCandidate[] };
-      };
+      }, {
+        fetcher: dependencies.fetcher,
+        sleep: dependencies.sleep,
+      }, async (response) => {
+        const value = await response.json() as JiemianPayload;
+        if (String(value.code) === "1") throw apiError(value);
+        return value;
+      });
       if (String(payload.code) !== "0") {
-        throw new Error(`Jiemian API error: ${String(payload.code)}`);
+        throw apiError(payload);
       }
       const candidates = Array.isArray(payload.result?.list)
         ? payload.result.list
