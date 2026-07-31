@@ -1,4 +1,10 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+} from "drizzle-orm/sqlite-core";
 
 export const items = sqliteTable("items", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -35,3 +41,33 @@ export const ingestionRuns = sqliteTable("ingestion_runs", {
   successCount: integer("success_count").notNull().default(0),
   failureCount: integer("failure_count").notNull().default(0),
 });
+
+export const backfillRuns = sqliteTable("backfill_runs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  requestedSourceId: text("requested_source_id"),
+  windowStart: integer("window_start", { mode: "timestamp_ms" }).notNull(),
+  windowEnd: integer("window_end", { mode: "timestamp_ms" }).notNull(),
+  startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+  finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+  status: text("status").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  index("backfill_runs_status_idx").on(table.status),
+]);
+
+export const backfillSourceRuns = sqliteTable("backfill_source_runs", {
+  runId: integer("run_id").notNull().references(() => backfillRuns.id),
+  sourceId: text("source_id").notNull(),
+  status: text("status").notNull(),
+  cursor: text("cursor"),
+  pagesFetched: integer("pages_fetched").notNull().default(0),
+  itemsFetched: integer("items_fetched").notNull().default(0),
+  itemsInWindow: integer("items_in_window").notNull().default(0),
+  itemsInserted: integer("items_inserted").notNull().default(0),
+  itemsExisting: integer("items_existing").notNull().default(0),
+  earliestCoveredAt: integer("earliest_covered_at", { mode: "timestamp_ms" }),
+  error: text("error"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.runId, table.sourceId] }),
+]);

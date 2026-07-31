@@ -31,6 +31,33 @@ const statements = [
     success_count INTEGER NOT NULL DEFAULT 0,
     failure_count INTEGER NOT NULL DEFAULT 0
   )`,
+  `CREATE TABLE IF NOT EXISTS backfill_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    requested_source_id TEXT,
+    window_start INTEGER NOT NULL,
+    window_end INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    finished_at INTEGER,
+    status TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS backfill_runs_status_idx ON backfill_runs (status)`,
+  `CREATE TABLE IF NOT EXISTS backfill_source_runs (
+    run_id INTEGER NOT NULL,
+    source_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    cursor TEXT,
+    pages_fetched INTEGER NOT NULL DEFAULT 0,
+    items_fetched INTEGER NOT NULL DEFAULT 0,
+    items_in_window INTEGER NOT NULL DEFAULT 0,
+    items_inserted INTEGER NOT NULL DEFAULT 0,
+    items_existing INTEGER NOT NULL DEFAULT 0,
+    earliest_covered_at INTEGER,
+    error TEXT,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (run_id, source_id),
+    FOREIGN KEY (run_id) REFERENCES backfill_runs (id)
+  )`,
 ];
 
 let initialized = false;
