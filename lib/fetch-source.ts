@@ -38,18 +38,28 @@ async function sha1Hex(value: string): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function buildClsUrl(): Promise<string> {
+export async function buildClsSignedUrl(
+  path: string,
+  extra: Record<string, string> = {},
+): Promise<string> {
   const params = {
     app: "CailianpressWeb",
     os: "web",
     sv: "8.7.9",
+    ...extra,
   };
-  const canonical = Object.entries(params)
+  const sorted = Object.entries(params)
     .sort(([left], [right]) => left.localeCompare(right, "en"))
-    .map(([key, value]) => `${key}=${value}`)
-    .join("&");
+  const canonical = sorted.map(([key, value]) => `${key}=${value}`).join("&");
   const sign = md5(await sha1Hex(canonical));
-  return `https://www.cls.cn/v3/depth/home/assembled/1000?${canonical}&sign=${sign}`;
+  const query = sorted.map(([key, value]) => (
+    `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
+  )).join("&");
+  return `https://www.cls.cn${path}?${query}&sign=${sign}`;
+}
+
+export function buildClsUrl(): Promise<string> {
+  return buildClsSignedUrl("/v3/depth/home/assembled/1000");
 }
 
 export async function fetchSource(source: SourceDefinition): Promise<NormalizedItem[]> {
