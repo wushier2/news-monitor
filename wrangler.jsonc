@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "news-monitor",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS"
+  },
+  "images": {
+    "binding": "IMAGES"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "news-monitor-db",
+      "database_id": "75190b32-a7c4-4fa4-9441-1697207bbbed",
+      "migrations_dir": "drizzle"
+    }
+  ]
+}

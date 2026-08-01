@@ -9,9 +9,11 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
+    "deploy": "vinext deploy",
     "test": "vitest run",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:remote": "wrangler d1 migrations apply news-monitor-db --remote"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
