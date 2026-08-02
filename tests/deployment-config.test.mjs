@@ -15,6 +15,7 @@ test("declares the production Worker and D1 deployment contract", async () => {
 
   assert.equal(wrangler.name, "news-monitor");
   assert.equal(wrangler.main, "./worker/index.ts");
+  assert.equal(wrangler.compatibility_date, "2026-05-22");
   assert.deepEqual(wrangler.compatibility_flags, ["nodejs_compat"]);
   assert.deepEqual(wrangler.assets, { binding: "ASSETS" });
   assert.deepEqual(wrangler.images, { binding: "IMAGES" });

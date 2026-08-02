@@ -84,10 +84,11 @@ export function create36KrBackfillAdapter(
           html,
           "window.initialState",
         ) as InitialState | null;
-        return pageResult(
-          state?.newsflashCatalogData?.data?.newsflashList?.data,
-          readNonce(html),
-        );
+        const data = state?.newsflashCatalogData?.data?.newsflashList?.data;
+        if (!data || !Array.isArray(data.itemList)) {
+          throw new Error("无法解析 36Kr 首屏数据");
+        }
+        return pageResult(data, readNonce(html));
       }
 
       const current = readCursor(cursor);

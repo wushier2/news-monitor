@@ -28,6 +28,17 @@ describe("36Kr backfill adapter", () => {
     expect(page.exhausted).toBe(false);
   });
 
+  it("rejects a first page without parseable newsflash data", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(
+      "<html><script>window.initialState={};</script></html>",
+    ));
+    const adapter = create36KrBackfillAdapter({ fetcher });
+
+    await expect(adapter.fetchPage(null)).rejects.toThrow(
+      "无法解析 36Kr 首屏数据",
+    );
+  });
+
   it("signs and advances a gateway page", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(nextJson));
     const adapter = create36KrBackfillAdapter({
