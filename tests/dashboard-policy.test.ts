@@ -9,6 +9,8 @@ import {
   BACKFILL_STATUS_LABELS,
   backfillStatusLabel,
   backfillSummary,
+  backfillToggleLabel,
+  shouldAutoExpandBackfill,
 } from "../lib/backfill/presentation";
 import type { BackfillRun } from "../lib/backfill/types";
 
@@ -79,5 +81,18 @@ describe("dashboard refresh policy", () => {
     expect(backfillSummary(run)).toBe("补采结束，共新增 20 条");
     expect(backfillSummary({ ...run, status: "running" }))
       .toBe("补采进行中，已新增 20 条");
+  });
+
+  it("auto-expands running and erroneous backfill panels", () => {
+    expect(shouldAutoExpandBackfill("running", false)).toBe(true);
+    expect(shouldAutoExpandBackfill("complete", false)).toBe(false);
+    expect(shouldAutoExpandBackfill(null, false)).toBe(false);
+    expect(shouldAutoExpandBackfill("complete", true)).toBe(true);
+    expect(shouldAutoExpandBackfill(null, true)).toBe(true);
+  });
+
+  it("labels the backfill disclosure action", () => {
+    expect(backfillToggleLabel(false)).toBe("查看明细");
+    expect(backfillToggleLabel(true)).toBe("收起明细");
   });
 });

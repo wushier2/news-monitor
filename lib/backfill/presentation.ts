@@ -22,3 +22,14 @@ export function backfillSummary(run: BackfillRun): string {
     ? `补采进行中，已新增 ${inserted} 条`
     : `补采结束，共新增 ${inserted} 条`;
 }
+
+export function shouldAutoExpandBackfill(
+  status: BackfillRun["status"] | null,
+  hasError: boolean,
+): boolean {
+  return hasError || status === "running";
+}
+
+export function backfillToggleLabel(expanded: boolean): string {
+  return expanded ? "收起明细" : "查看明细";
+}
