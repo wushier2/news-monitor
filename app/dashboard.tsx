@@ -27,6 +27,8 @@ import type {
 import {
   backfillStatusLabel,
   backfillSummary,
+  backfillToggleLabel,
+  shouldAutoExpandBackfill,
 } from "../lib/backfill/presentation";
 
 const PAGE_SIZE = 50;
@@ -108,6 +110,7 @@ export default function Dashboard() {
   const [backfillRun, setBackfillRun] = useState<BackfillRun | null>(null);
   const [backfillStarting, setBackfillStarting] = useState(false);
   const [backfillError, setBackfillError] = useState<string | null>(null);
+  const [backfillExpanded, setBackfillExpanded] = useState(false);
   const [backfillConfirmOpen, setBackfillConfirmOpen] = useState(false);
   const pickerBounds = useMemo(() => getBeijingInputBounds(), []);
   const refreshingRef = useRef(false);
@@ -299,10 +302,14 @@ export default function Dashboard() {
         if (payload.run?.status === "running") {
           observedRunningBackfillsRef.current.add(payload.run.id);
         }
+        if (shouldAutoExpandBackfill(payload.run?.status ?? null, false)) {
+          setBackfillExpanded(true);
+        }
         setBackfillRun(payload.run);
       })
       .catch((error: unknown) => {
         if (!active) return;
+        setBackfillExpanded(true);
         setBackfillError(
           error instanceof Error ? error.message : "无法读取补采任务",
         );
@@ -333,6 +340,7 @@ export default function Dashboard() {
         setBackfillError(null);
       } catch (error) {
         if (!active) return;
+        setBackfillExpanded(true);
         setBackfillError(
           error instanceof Error ? error.message : "无法读取补采进度",
         );
@@ -404,9 +412,13 @@ export default function Dashboard() {
       if (payload.run.status === "running") {
         observedRunningBackfillsRef.current.add(payload.run.id);
       }
+      if (shouldAutoExpandBackfill(payload.run.status, false)) {
+        setBackfillExpanded(true);
+      }
       setBackfillRun(payload.run);
       setNotice(payload.reused ? "已恢复正在进行的补采任务" : "补采任务已启动");
     } catch (error) {
+      setBackfillExpanded(true);
       setBackfillError(error instanceof Error ? error.message : "无法启动补采");
     } finally {
       setBackfillStarting(false);
@@ -539,53 +551,94 @@ export default function Dashboard() {
       )}
 
       {(backfillRun || backfillError) && (
-        <section className="backfill-panel" aria-live="polite">
-          <div className="backfill-panel-heading">
-            <div>
-              <span className="section-kicker">HISTORICAL COVERAGE</span>
-              <h2>过去 24 小时补充采集</h2>
-            </div>
-            {backfillRun && (
-              <div className="backfill-overview">
-                <strong>{backfillSummary(backfillRun)}</strong>
-                <span>
-                  {formatTime(backfillRun.windowStart)} 至 {formatTime(backfillRun.windowEnd)}
-                </span>
-              </div>
-            )}
-          </div>
-          {backfillError && <p className="backfill-error" role="alert">{backfillError}</p>}
-          {backfillRun && (
-            <div className="backfill-source-list">
-              {backfillRun.sources.map((source) => {
-                const definition = SOURCES.find((item) => item.id === source.sourceId);
-                const showError = ["partial", "failed", "interrupted"].includes(source.status)
-                  && source.error;
-                return (
-                  <article className="backfill-source-row" key={source.sourceId}>
-                    <div className="backfill-source-name">
-                      <strong>{definition?.sourceName ?? source.sourceId}</strong>
-                      <span>{definition?.channelName}</span>
-                    </div>
-                    <span className={`backfill-status backfill-status-${source.status}`}>
-                      {backfillStatusLabel(source.status)}
-                    </span>
-                    <div className="backfill-metrics">
-                      <span>{source.pagesFetched} 页</span>
-                      <span>抓取 {source.itemsFetched} 条</span>
-                      <strong>新增 {source.itemsInserted} 条</strong>
-                    </div>
-                    <div className="backfill-coverage">
-                      {source.earliestCoveredAt
-                        ? `已覆盖至 ${formatTime(source.earliestCoveredAt)}`
-                        : "尚无有效时间覆盖"}
-                      {showError && <small>{source.error}</small>}
-                    </div>
-                  </article>
-                );
-              })}
+        <section
+          className={`backfill-panel ${backfillExpanded ? "" : "backfill-panel-collapsed"}`}
+          aria-live="polite"
+        >
+          {!backfillExpanded && (
+            <div className="backfill-compact-bar">
+              <strong>过去 24 小时补采</strong>
+              <span>
+                {backfillRun ? backfillSummary(backfillRun) : "补采状态异常"}
+              </span>
+              {backfillRun?.finishedAt && (
+                <time dateTime={backfillRun.finishedAt}>
+                  {formatTime(backfillRun.finishedAt)}
+                </time>
+              )}
+              <button
+                className="backfill-toggle"
+                aria-expanded={false}
+                aria-controls="backfill-details"
+                onClick={() => setBackfillExpanded(true)}
+              >
+                {backfillToggleLabel(false)} <span aria-hidden="true">⌄</span>
+              </button>
             </div>
           )}
+
+          <div id="backfill-details" hidden={!backfillExpanded}>
+            {backfillExpanded && (
+              <>
+                <div className="backfill-panel-heading">
+                  <div>
+                    <span className="section-kicker">HISTORICAL COVERAGE</span>
+                    <h2>过去 24 小时补充采集</h2>
+                  </div>
+                  <div className="backfill-heading-actions">
+                    {backfillRun && (
+                      <div className="backfill-overview">
+                        <strong>{backfillSummary(backfillRun)}</strong>
+                        <span>
+                          {formatTime(backfillRun.windowStart)} 至 {formatTime(backfillRun.windowEnd)}
+                        </span>
+                      </div>
+                    )}
+                    <button
+                      className="backfill-toggle"
+                      aria-expanded={true}
+                      aria-controls="backfill-details"
+                      onClick={() => setBackfillExpanded(false)}
+                    >
+                      {backfillToggleLabel(true)} <span aria-hidden="true">⌃</span>
+                    </button>
+                  </div>
+                </div>
+                {backfillError && <p className="backfill-error" role="alert">{backfillError}</p>}
+                {backfillRun && (
+                  <div className="backfill-source-list">
+                    {backfillRun.sources.map((source) => {
+                      const definition = SOURCES.find((item) => item.id === source.sourceId);
+                      const showError = ["partial", "failed", "interrupted"].includes(source.status)
+                        && source.error;
+                      return (
+                        <article className="backfill-source-row" key={source.sourceId}>
+                          <div className="backfill-source-name">
+                            <strong>{definition?.sourceName ?? source.sourceId}</strong>
+                            <span>{definition?.channelName}</span>
+                          </div>
+                          <span className={`backfill-status backfill-status-${source.status}`}>
+                            {backfillStatusLabel(source.status)}
+                          </span>
+                          <div className="backfill-metrics">
+                            <span>{source.pagesFetched} 页</span>
+                            <span>抓取 {source.itemsFetched} 条</span>
+                            <strong>新增 {source.itemsInserted} 条</strong>
+                          </div>
+                          <div className="backfill-coverage">
+                            {source.earliestCoveredAt
+                              ? `已覆盖至 ${formatTime(source.earliestCoveredAt)}`
+                              : "尚无有效时间覆盖"}
+                            {showError && <small>{source.error}</small>}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </section>
       )}
 
