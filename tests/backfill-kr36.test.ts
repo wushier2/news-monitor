@@ -29,13 +29,56 @@ describe("36Kr backfill adapter", () => {
   });
 
   it("rejects a first page without parseable newsflash data", async () => {
-    const fetcher = vi.fn().mockResolvedValue(new Response(
-      "<html><script>window.initialState={};</script></html>",
+    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response("<html><script>window.initialState={};</script></html>"),
     ));
-    const adapter = create36KrBackfillAdapter({ fetcher });
+    const adapter = create36KrBackfillAdapter({
+      fetcher,
+      sleep: vi.fn().mockResolvedValue(undefined),
+    });
 
     await expect(adapter.fetchPage(null)).rejects.toThrow(
       "无法解析 36Kr 首屏数据",
+    );
+  });
+
+  it("retries a temporarily invalid first-page response", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        "<html><script>window.initialState={};</script></html>",
+      ))
+      .mockResolvedValueOnce(new Response(firstHtml));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const adapter = create36KrBackfillAdapter({ fetcher, sleep });
+
+    const page = await adapter.fetchPage(null);
+
+    expect(page.items).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(1_000);
+  });
+
+  it("falls back to the www host after repeated invalid first-page responses", async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).startsWith("https://www.36kr.com/")) {
+        return new Response(firstHtml);
+      }
+      return new Response(
+        "<html><script>window.initialState={};</script></html>",
+      );
+    });
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const adapter = create36KrBackfillAdapter({ fetcher, sleep });
+
+    const page = await adapter.fetchPage(null);
+
+    expect(page.items).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher.mock.calls.slice(0, 3).every(
+      ([url]) => String(url) === "https://36kr.com/newsflashes/catalog/4",
+    )).toBe(true);
+    expect(fetcher.mock.calls[3]?.[0]).toBe(
+      "https://www.36kr.com/newsflashes/catalog/4",
     );
   });
 

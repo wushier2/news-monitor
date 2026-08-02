@@ -5,6 +5,7 @@ import { fetchWithRetry, type Fetcher, type Sleep } from "../http";
 import type { BackfillAdapter, BackfillPageResult } from "../types";
 
 const FIRST_PAGE_URL = "https://36kr.com/newsflashes/catalog/4";
+const FIRST_PAGE_FALLBACK_URL = "https://www.36kr.com/newsflashes/catalog/4";
 const GATEWAY_URL = "https://gateway.36kr.com/api/mis/nav/newsflash/list";
 const GATEWAY_FALLBACK_URL = "http://gateway.36kr.com/api/mis/nav/newsflash/list";
 const USER_AGENT = "Mozilla/5.0 (compatible; PublicOpinionMonitor/1.0; +https://openai.com)";
@@ -28,6 +29,12 @@ interface InitialState {
 interface Kr36Cursor {
   nonce: string;
   pageCallback: string;
+}
+
+class FirstPageParseError extends Error {
+  constructor() {
+    super("无法解析 36Kr 首屏数据");
+  }
 }
 
 function pageResult(data: PageData | undefined, nonce: string): BackfillPageResult {
@@ -67,28 +74,36 @@ export function create36KrBackfillAdapter(
   dependencies: { fetcher?: Fetcher; now?: () => number; sleep?: Sleep } = {},
 ): BackfillAdapter {
   const now = dependencies.now ?? Date.now;
+  const fetchFirstPage = (url: string) => fetchWithRetry(url, {
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      "user-agent": USER_AGENT,
+    },
+  }, {
+    fetcher: dependencies.fetcher,
+    sleep: dependencies.sleep,
+  }, async (response) => {
+    const html = await response.text();
+    const state = extractAssignedJson(
+      html,
+      "window.initialState",
+    ) as InitialState | null;
+    const data = state?.newsflashCatalogData?.data?.newsflashList?.data;
+    if (!data || !Array.isArray(data.itemList)) {
+      throw new FirstPageParseError();
+    }
+    return pageResult(data, readNonce(html));
+  });
   return {
     sourceId: "36kr-macro",
     async fetchPage(cursor) {
       if (cursor === null) {
-        const html = await fetchWithRetry(FIRST_PAGE_URL, {
-          headers: {
-            accept: "text/html,application/xhtml+xml",
-            "user-agent": USER_AGENT,
-          },
-        }, {
-          fetcher: dependencies.fetcher,
-          sleep: dependencies.sleep,
-        }, (response) => response.text());
-        const state = extractAssignedJson(
-          html,
-          "window.initialState",
-        ) as InitialState | null;
-        const data = state?.newsflashCatalogData?.data?.newsflashList?.data;
-        if (!data || !Array.isArray(data.itemList)) {
-          throw new Error("无法解析 36Kr 首屏数据");
+        try {
+          return await fetchFirstPage(FIRST_PAGE_URL);
+        } catch (error) {
+          if (!(error instanceof FirstPageParseError)) throw error;
+          return fetchFirstPage(FIRST_PAGE_FALLBACK_URL);
         }
-        return pageResult(data, readNonce(html));
       }
 
       const current = readCursor(cursor);
