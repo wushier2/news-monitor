@@ -212,6 +212,33 @@ button:focus-visible, input:focus-visible, a:focus-visible {
   background: #fbfcf9;
   border-bottom: 1px solid var(--line);
 }
+.backfill-panel-collapsed { padding: 0; }
+.backfill-compact-bar {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-height: 42px;
+  padding: 7px 24px;
+}
+.backfill-compact-bar > strong { color: var(--forest); font-size: 12px; }
+.backfill-compact-bar > span { color: var(--muted); font-size: 10px; }
+.backfill-compact-bar time { color: #8a948e; font-size: 10px; }
+.backfill-heading-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+}
+.backfill-toggle {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid #cfd8d1;
+  border-radius: 6px;
+  color: var(--forest);
+  background: #fff;
+  font-size: 10px;
+  font-weight: 750;
+}
+.backfill-compact-bar .backfill-toggle { margin-left: auto; }
 .backfill-panel-heading {
   display: flex;
   align-items: end;
@@ -402,6 +429,19 @@ footer {
   .backfill-confirm { align-items: flex-start; padding: 12px; }
   .backfill-confirm-actions { flex-wrap: wrap; justify-content: flex-end; }
   .backfill-panel { padding: 16px 12px; }
+  .backfill-panel-collapsed { padding: 0; }
+  .backfill-compact-bar {
+    flex-wrap: wrap;
+    gap: 5px 10px;
+    padding: 8px 12px;
+  }
+  .backfill-compact-bar > strong { width: 100%; }
+  .backfill-compact-bar .backfill-toggle { margin-left: auto; }
+  .backfill-heading-actions {
+    align-items: flex-start;
+    justify-content: space-between;
+    width: 100%;
+  }
   .backfill-panel-heading { display: grid; align-items: start; }
   .backfill-overview { text-align: left; }
   .backfill-source-row {
