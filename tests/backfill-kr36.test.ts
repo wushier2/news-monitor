@@ -13,22 +13,76 @@ const nextJson = readFileSync(new URL(
 ), "utf8");
 
 describe("36Kr backfill adapter", () => {
-  it("reads first-page nonce and callback from HTML", async () => {
-    const fetcher = vi.fn().mockResolvedValue(new Response(firstHtml));
+  it("loads the first page from the gateway when HTML only contains a nonce", async () => {
+    const shellHtml = [
+      "<html><script>",
+      'window.__GATEWAY_SIGN__="fixture-nonce";',
+      "window.initialState={};",
+      "</script></html>",
+    ].join("");
+    const fetcher = vi.fn(async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      void init;
+      return String(input).includes("gateway.36kr.com")
+        ? new Response(nextJson)
+        : new Response(shellHtml);
+    });
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const adapter = create36KrBackfillAdapter({
+      fetcher,
+      sleep,
+      now: () => 1_785_500_000_000,
+    });
+
+    const page = await adapter.fetchPage(null);
+
+    expect(page.items).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const [gatewayUrl, gatewayInit] = fetcher.mock.calls[1]!;
+    expect(gatewayInit).toBeDefined();
+    const body = JSON.parse(String(gatewayInit!.body));
+    expect(body).toEqual({
+      nonce: "fixture-nonce",
+      partner_id: "web",
+      timestamp: 1_785_500_000_000,
+      param: {
+        pageSize: 20,
+        pageEvent: 0,
+        siteId: 1,
+        type: 4,
+        platformId: 2,
+      },
+    });
+    expect(gatewayUrl).toBe(
+      `https://gateway.36kr.com/api/mis/nav/newsflash/list?sign=${
+        md5(JSON.stringify(body) + "fixture-nonce")
+      }`,
+    );
+  });
+
+  it("reads the nonce from HTML and callback from the first gateway page", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(firstHtml))
+      .mockResolvedValueOnce(new Response(nextJson));
     const adapter = create36KrBackfillAdapter({ fetcher });
     const page = await adapter.fetchPage(null);
     expect(fetcher.mock.calls[0]?.[0]).toBe(
       "https://36kr.com/newsflashes/catalog/4",
     );
+    expect(fetcher.mock.calls[1]?.[0]).toMatch(
+      /^https:\/\/gateway\.36kr\.com\/api\/mis\/nav\/newsflash\/list\?sign=/,
+    );
     expect(page.items).toHaveLength(2);
     expect(JSON.parse(page.nextCursor!)).toEqual({
       nonce: "fixture-nonce",
-      pageCallback: "fixture-callback",
+      pageCallback: "next-token",
     });
     expect(page.exhausted).toBe(false);
   });
 
-  it("rejects a first page without parseable newsflash data", async () => {
+  it("rejects a first page without a gateway nonce", async () => {
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(
       new Response("<html><script>window.initialState={};</script></html>"),
     ));
@@ -38,7 +92,7 @@ describe("36Kr backfill adapter", () => {
     });
 
     await expect(adapter.fetchPage(null)).rejects.toThrow(
-      "无法解析 36Kr 首屏数据",
+      "无法读取 36Kr 首屏签名",
     );
   });
 
@@ -47,19 +101,23 @@ describe("36Kr backfill adapter", () => {
       .mockResolvedValueOnce(new Response(
         "<html><script>window.initialState={};</script></html>",
       ))
-      .mockResolvedValueOnce(new Response(firstHtml));
+      .mockResolvedValueOnce(new Response(firstHtml))
+      .mockResolvedValueOnce(new Response(nextJson));
     const sleep = vi.fn().mockResolvedValue(undefined);
     const adapter = create36KrBackfillAdapter({ fetcher, sleep });
 
     const page = await adapter.fetchPage(null);
 
     expect(page.items).toHaveLength(2);
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledWith(1_000);
   });
 
   it("falls back to the www host after repeated invalid first-page responses", async () => {
     const fetcher = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).includes("gateway.36kr.com")) {
+        return new Response(nextJson);
+      }
       if (String(input).startsWith("https://www.36kr.com/")) {
         return new Response(firstHtml);
       }
@@ -73,12 +131,15 @@ describe("36Kr backfill adapter", () => {
     const page = await adapter.fetchPage(null);
 
     expect(page.items).toHaveLength(2);
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher).toHaveBeenCalledTimes(5);
     expect(fetcher.mock.calls.slice(0, 3).every(
       ([url]) => String(url) === "https://36kr.com/newsflashes/catalog/4",
     )).toBe(true);
     expect(fetcher.mock.calls[3]?.[0]).toBe(
       "https://www.36kr.com/newsflashes/catalog/4",
+    );
+    expect(String(fetcher.mock.calls[4]?.[0])).toMatch(
+      /^https:\/\/gateway\.36kr\.com\//,
     );
   });
 

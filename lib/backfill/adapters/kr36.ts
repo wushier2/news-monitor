@@ -1,5 +1,4 @@
 import { md5 } from "js-md5";
-import { extractAssignedJson } from "../../parsers/common";
 import { parse36KrCandidates, type Kr36Candidate } from "../../parsers/kr36";
 import { fetchWithRetry, type Fetcher, type Sleep } from "../http";
 import type { BackfillAdapter, BackfillPageResult } from "../types";
@@ -16,24 +15,14 @@ interface PageData {
   hasNextPage?: unknown;
 }
 
-interface InitialState {
-  newsflashCatalogData?: {
-    data?: {
-      newsflashList?: {
-        data?: PageData;
-      };
-    };
-  };
-}
-
 interface Kr36Cursor {
   nonce: string;
   pageCallback: string;
 }
 
-class FirstPageParseError extends Error {
+class FirstPageNonceError extends Error {
   constructor() {
-    super("无法解析 36Kr 首屏数据");
+    super("无法读取 36Kr 首屏签名");
   }
 }
 
@@ -74,7 +63,7 @@ export function create36KrBackfillAdapter(
   dependencies: { fetcher?: Fetcher; now?: () => number; sleep?: Sleep } = {},
 ): BackfillAdapter {
   const now = dependencies.now ?? Date.now;
-  const fetchFirstPage = (url: string) => fetchWithRetry(url, {
+  const fetchFirstPageNonce = (url: string) => fetchWithRetry(url, {
     headers: {
       accept: "text/html,application/xhtml+xml",
       "user-agent": USER_AGENT,
@@ -84,70 +73,81 @@ export function create36KrBackfillAdapter(
     sleep: dependencies.sleep,
   }, async (response) => {
     const html = await response.text();
-    const state = extractAssignedJson(
-      html,
-      "window.initialState",
-    ) as InitialState | null;
-    const data = state?.newsflashCatalogData?.data?.newsflashList?.data;
-    if (!data || !Array.isArray(data.itemList)) {
-      throw new FirstPageParseError();
-    }
-    return pageResult(data, readNonce(html));
+    const nonce = readNonce(html);
+    if (!nonce) throw new FirstPageNonceError();
+    return nonce;
   });
+  const fetchGatewayPage = async (
+    nonce: string,
+    pageCallback?: string,
+  ): Promise<BackfillPageResult> => {
+    const param = pageCallback === undefined
+      ? {
+          pageSize: 20,
+          pageEvent: 0,
+          siteId: 1,
+          type: 4,
+          platformId: 2,
+        }
+      : {
+          pageSize: 20,
+          pageEvent: 1,
+          pageCallback,
+          siteId: 1,
+          type: 4,
+          platformId: 2,
+        };
+    const body = {
+      nonce,
+      partner_id: "web",
+      timestamp: now(),
+      param,
+    };
+    const sign = md5(JSON.stringify(body) + nonce);
+    const fetchGateway = (gatewayUrl: string) => fetchWithRetry(
+      `${gatewayUrl}?sign=${sign}`,
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          origin: "https://36kr.com",
+          referer: FIRST_PAGE_URL,
+          "user-agent": USER_AGENT,
+        },
+        body: JSON.stringify(body),
+      },
+      {
+        fetcher: dependencies.fetcher,
+        sleep: dependencies.sleep,
+      },
+      (response) => response.json() as Promise<{ data?: PageData }>,
+    );
+    let payload: { data?: PageData };
+    try {
+      payload = await fetchGateway(GATEWAY_URL);
+    } catch (error) {
+      if (!isConnectionLost(error)) throw error;
+      payload = await fetchGateway(GATEWAY_FALLBACK_URL);
+    }
+    return pageResult(payload.data, nonce);
+  };
   return {
     sourceId: "36kr-macro",
     async fetchPage(cursor) {
       if (cursor === null) {
+        let nonce: string;
         try {
-          return await fetchFirstPage(FIRST_PAGE_URL);
+          nonce = await fetchFirstPageNonce(FIRST_PAGE_URL);
         } catch (error) {
-          if (!(error instanceof FirstPageParseError)) throw error;
-          return fetchFirstPage(FIRST_PAGE_FALLBACK_URL);
+          if (!(error instanceof FirstPageNonceError)) throw error;
+          nonce = await fetchFirstPageNonce(FIRST_PAGE_FALLBACK_URL);
         }
+        return fetchGatewayPage(nonce);
       }
 
       const current = readCursor(cursor);
-      const body = {
-        nonce: current.nonce,
-        partner_id: "web",
-        timestamp: now(),
-        param: {
-          pageSize: 20,
-          pageEvent: 1,
-          pageCallback: current.pageCallback,
-          siteId: 1,
-          type: 4,
-          platformId: 2,
-        },
-      };
-      const sign = md5(JSON.stringify(body) + current.nonce);
-      const fetchGateway = (gatewayUrl: string) => fetchWithRetry(
-        `${gatewayUrl}?sign=${sign}`,
-        {
-          method: "POST",
-          headers: {
-            accept: "application/json",
-            "content-type": "application/json",
-            origin: "https://36kr.com",
-            referer: FIRST_PAGE_URL,
-            "user-agent": USER_AGENT,
-          },
-          body: JSON.stringify(body),
-        },
-        {
-          fetcher: dependencies.fetcher,
-          sleep: dependencies.sleep,
-        },
-        (response) => response.json() as Promise<{ data?: PageData }>,
-      );
-      let payload: { data?: PageData };
-      try {
-        payload = await fetchGateway(GATEWAY_URL);
-      } catch (error) {
-        if (!isConnectionLost(error)) throw error;
-        payload = await fetchGateway(GATEWAY_FALLBACK_URL);
-      }
-      return pageResult(payload.data, current.nonce);
+      return fetchGatewayPage(current.nonce, current.pageCallback);
     },
   };
 }
