@@ -5,6 +5,7 @@ import type { BackfillAdapter, BackfillPageResult } from "../types";
 
 const FIRST_PAGE_URL = "https://36kr.com/newsflashes/catalog/4";
 const FIRST_PAGE_FALLBACK_URL = "https://www.36kr.com/newsflashes/catalog/4";
+const FIRST_PAGE_MOBILE_URL = "https://m.36kr.com/newsflashes";
 const GATEWAY_URL = "https://gateway.36kr.com/api/mis/nav/newsflash/list";
 const GATEWAY_FALLBACK_URL = "http://gateway.36kr.com/api/mis/nav/newsflash/list";
 const USER_AGENT = "Mozilla/5.0 (compatible; PublicOpinionMonitor/1.0; +https://openai.com)";
@@ -66,6 +67,7 @@ export function create36KrBackfillAdapter(
   const fetchFirstPageNonce = (url: string) => fetchWithRetry(url, {
     headers: {
       accept: "text/html,application/xhtml+xml",
+      referer: new URL(url).origin,
       "user-agent": USER_AGENT,
     },
   }, {
@@ -136,13 +138,22 @@ export function create36KrBackfillAdapter(
     sourceId: "36kr-macro",
     async fetchPage(cursor) {
       if (cursor === null) {
-        let nonce: string;
-        try {
-          nonce = await fetchFirstPageNonce(FIRST_PAGE_URL);
-        } catch (error) {
-          if (!(error instanceof FirstPageNonceError)) throw error;
-          nonce = await fetchFirstPageNonce(FIRST_PAGE_FALLBACK_URL);
+        let nonce = "";
+        let nonceError: FirstPageNonceError | null = null;
+        for (const url of [
+          FIRST_PAGE_URL,
+          FIRST_PAGE_FALLBACK_URL,
+          FIRST_PAGE_MOBILE_URL,
+        ]) {
+          try {
+            nonce = await fetchFirstPageNonce(url);
+            break;
+          } catch (error) {
+            if (!(error instanceof FirstPageNonceError)) throw error;
+            nonceError = error;
+          }
         }
+        if (!nonce) throw nonceError ?? new FirstPageNonceError();
         return fetchGatewayPage(nonce);
       }
 

@@ -40,6 +40,9 @@ describe("36Kr backfill adapter", () => {
 
     expect(page.items).toHaveLength(2);
     expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[0]?.[1]?.headers).toMatchObject({
+      referer: "https://36kr.com",
+    });
     const [gatewayUrl, gatewayInit] = fetcher.mock.calls[1]!;
     expect(gatewayInit).toBeDefined();
     const body = JSON.parse(String(gatewayInit!.body));
@@ -139,6 +142,32 @@ describe("36Kr backfill adapter", () => {
       "https://www.36kr.com/newsflashes/catalog/4",
     );
     expect(String(fetcher.mock.calls[4]?.[0])).toMatch(
+      /^https:\/\/gateway\.36kr\.com\//,
+    );
+  });
+
+  it("falls back to the mobile page when desktop pages have no nonce", async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("gateway.36kr.com")) return new Response(nextJson);
+      if (url === "https://m.36kr.com/newsflashes") {
+        return new Response(firstHtml);
+      }
+      return new Response(
+        "<html><script>window.initialState={};</script></html>",
+      );
+    });
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const adapter = create36KrBackfillAdapter({ fetcher, sleep });
+
+    const page = await adapter.fetchPage(null);
+
+    expect(page.items).toHaveLength(2);
+    expect(fetcher).toHaveBeenCalledTimes(8);
+    expect(fetcher.mock.calls[6]?.[0]).toBe(
+      "https://m.36kr.com/newsflashes",
+    );
+    expect(String(fetcher.mock.calls[7]?.[0])).toMatch(
       /^https:\/\/gateway\.36kr\.com\//,
     );
   });
