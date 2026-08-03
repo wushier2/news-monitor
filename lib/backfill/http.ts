@@ -5,6 +5,12 @@ export type Fetcher = (
 export type Sleep = (milliseconds: number) => Promise<void>;
 export type ResponseReader<T> = (response: Response) => Promise<T>;
 
+interface FetchWithRetryDependencies {
+  fetcher?: Fetcher;
+  sleep?: Sleep;
+  shouldRetryError?: (error: unknown) => boolean;
+}
+
 const defaultSleep: Sleep = (milliseconds) => new Promise(
   (resolve) => setTimeout(resolve, milliseconds),
 );
@@ -17,13 +23,13 @@ export function fetchWithRetry(
 export function fetchWithRetry<T>(
   url: string,
   init: RequestInit,
-  dependencies: { fetcher?: Fetcher; sleep?: Sleep },
+  dependencies: FetchWithRetryDependencies,
   read: ResponseReader<T>,
 ): Promise<T>;
 export async function fetchWithRetry<T>(
   url: string,
   init: RequestInit,
-  dependencies: { fetcher?: Fetcher; sleep?: Sleep } = {},
+  dependencies: FetchWithRetryDependencies = {},
   read?: ResponseReader<T>,
 ): Promise<Response | T> {
   const fetcher = dependencies.fetcher ?? fetch;
@@ -41,7 +47,9 @@ export async function fetchWithRetry<T>(
         return read ? await read(response) : response;
       }
     } catch (error) {
-      if (attempt === 2) throw error;
+      if (dependencies.shouldRetryError?.(error) === false || attempt === 2) {
+        throw error;
+      }
       await sleep(2 ** attempt * 1_000);
       continue;
     }

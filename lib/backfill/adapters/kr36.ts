@@ -21,10 +21,33 @@ interface Kr36Cursor {
   pageCallback: string;
 }
 
+export interface Kr36RecoveryState {
+  nonce: string | null;
+  riskCooldownUntil: number | null;
+}
+
+export interface Kr36AdapterDependencies {
+  fetcher?: Fetcher;
+  now?: () => number;
+  sleep?: Sleep;
+  loadRecoveryState?: () => Promise<Kr36RecoveryState>;
+}
+
 class FirstPageNonceError extends Error {
   constructor(readonly diagnostic = "") {
     super(`无法读取 36Kr 首屏签名${diagnostic ? `：${diagnostic}` : ""}`);
   }
+}
+
+class FirstPageRiskError extends Error {
+  constructor(readonly diagnostic: string) {
+    super(`36Kr 风控拦截：${diagnostic}`);
+  }
+}
+
+function isRiskControlPage(html: string): boolean {
+  return /captcha|访问过于频繁|安全验证|人机验证|cf-chl-|verifycenter/i
+    .test(html);
 }
 
 function firstPageDiagnostic(url: string, response: Response, html: string): string {
@@ -33,8 +56,7 @@ function firstPageDiagnostic(url: string, response: Response, html: string): str
     ?.trim() || "unknown";
   const bytes = new TextEncoder().encode(html).byteLength;
   const spider = /["']isSpider["']\s*:\s*true/i.test(html);
-  const risk = /captcha|访问过于频繁|安全验证|人机验证|cf-chl-|verifycenter/i
-    .test(html);
+  const risk = isRiskControlPage(html);
   return `${new URL(url).host}(status=${response.status},type=${contentType},bytes=${bytes},sig=0,sp=${spider ? 1 : 0},risk=${risk ? 1 : 0})`;
 }
 
@@ -72,7 +94,7 @@ function isConnectionLost(error: unknown): boolean {
 }
 
 export function create36KrBackfillAdapter(
-  dependencies: { fetcher?: Fetcher; now?: () => number; sleep?: Sleep } = {},
+  dependencies: Kr36AdapterDependencies = {},
 ): BackfillAdapter {
   const now = dependencies.now ?? Date.now;
   const fetchFirstPageNonce = (url: string) => fetchWithRetry(url, {
@@ -84,11 +106,14 @@ export function create36KrBackfillAdapter(
   }, {
     fetcher: dependencies.fetcher,
     sleep: dependencies.sleep,
+    shouldRetryError: (error) => !(error instanceof FirstPageRiskError),
   }, async (response) => {
     const html = await response.text();
     const nonce = readNonce(html);
+    const diagnostic = firstPageDiagnostic(url, response, html);
+    if (isRiskControlPage(html)) throw new FirstPageRiskError(diagnostic);
     if (!nonce) {
-      throw new FirstPageNonceError(firstPageDiagnostic(url, response, html));
+      throw new FirstPageNonceError(diagnostic);
     }
     return nonce;
   });
@@ -145,12 +170,29 @@ export function create36KrBackfillAdapter(
       if (!isConnectionLost(error)) throw error;
       payload = await fetchGateway(GATEWAY_FALLBACK_URL);
     }
+    if (!Array.isArray(payload.data?.itemList)) {
+      throw new Error("36Kr 网关未返回有效列表");
+    }
     return pageResult(payload.data, nonce);
   };
   return {
     sourceId: "36kr-macro",
     async fetchPage(cursor) {
       if (cursor === null) {
+        const recovery = await dependencies.loadRecoveryState?.();
+        if (recovery?.nonce) {
+          try {
+            return await fetchGatewayPage(recovery.nonce);
+          } catch {
+            // A stale cached nonce is refreshed from the public first page.
+          }
+        }
+        if (recovery?.riskCooldownUntil && recovery.riskCooldownUntil > now()) {
+          const minutes = Math.ceil(
+            (recovery.riskCooldownUntil - now()) / 60_000,
+          );
+          throw new Error(`36Kr 风控冷却中（剩余约 ${minutes} 分钟）`);
+        }
         let nonce = "";
         let nonceError: FirstPageNonceError | null = null;
         const diagnostics: string[] = [];
@@ -163,6 +205,7 @@ export function create36KrBackfillAdapter(
             nonce = await fetchFirstPageNonce(url);
             break;
           } catch (error) {
+            if (error instanceof FirstPageRiskError) throw error;
             if (!(error instanceof FirstPageNonceError)) throw error;
             nonceError = error;
             if (error.diagnostic) diagnostics.push(error.diagnostic);

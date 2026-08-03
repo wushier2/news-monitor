@@ -84,9 +84,9 @@ export function startBackfill(
       windowEnd: requestedAt.getTime(),
       now: requestedAt,
     });
-    const adapters = sourceIds.map(
-      dependencies.createAdapter ?? createBackfillAdapter,
-    );
+    const adapters = sourceIds.map((sourceId) => dependencies.createAdapter
+      ? dependencies.createAdapter(sourceId)
+      : createBackfillAdapter(sourceId, { db, beforeRunId: run.id }));
     const clock = dependencies.clock ?? (() => new Date());
     const runSources = dependencies.runSources ?? runBackfillSources;
     const pageWait = dependencies.waitBetweenPages ?? waitBetweenPages;

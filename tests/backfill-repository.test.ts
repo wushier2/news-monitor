@@ -6,6 +6,7 @@ import {
   findRunningBackfill,
   finishBackfillRun,
   getBackfillRun,
+  getBackfillRecoveryState,
   getLatestBackfillRun,
   interruptRunningBackfills,
   updateBackfillSource,
@@ -148,5 +149,66 @@ describe("backfill repository", () => {
     }, later);
     expect((await getBackfillRun(testDb.db, run.id))?.sources[0]?.error)
       .toHaveLength(240);
+  });
+
+  it("reads a prior nonce cursor separately from the latest risk state", async () => {
+    const cursor = JSON.stringify({
+      nonce: "cached-nonce",
+      pageCallback: "cached-callback",
+    });
+    const successful = await createBackfillRun(testDb.db, {
+      sourceIds: ["36kr-macro"],
+      requestedSourceId: "36kr-macro",
+      windowStart: now.getTime() - 86_400_000,
+      windowEnd: now.getTime(),
+      now,
+    });
+    await updateBackfillSource(testDb.db, successful.id, "36kr-macro", {
+      status: "complete",
+      cursor,
+      pagesFetched: 2,
+      itemsFetched: 40,
+      itemsInWindow: 20,
+      itemsInserted: 20,
+      itemsExisting: 0,
+      earliestCoveredAt: now.getTime() - 86_400_000,
+      error: null,
+    }, now);
+
+    const blocked = await createBackfillRun(testDb.db, {
+      sourceIds: ["36kr-macro"],
+      requestedSourceId: "36kr-macro",
+      windowStart: later.getTime() - 86_400_000,
+      windowEnd: later.getTime(),
+      now: later,
+    });
+    await updateBackfillSource(testDb.db, blocked.id, "36kr-macro", {
+      status: "failed",
+      cursor: null,
+      pagesFetched: 0,
+      itemsFetched: 0,
+      itemsInWindow: 0,
+      itemsInserted: 0,
+      itemsExisting: 0,
+      earliestCoveredAt: null,
+      error: "36Kr 风控拦截：risk=1",
+    }, later);
+    const current = await createBackfillRun(testDb.db, {
+      sourceIds: ["36kr-macro"],
+      requestedSourceId: "36kr-macro",
+      windowStart: later.getTime() - 86_400_000,
+      windowEnd: later.getTime(),
+      now: new Date(later.getTime() + 1),
+    });
+
+    await expect(getBackfillRecoveryState(
+      testDb.db,
+      "36kr-macro",
+      current.id,
+    )).resolves.toEqual({
+      cursor,
+      latestError: "36Kr 风控拦截：risk=1",
+      latestUpdatedAt: later.getTime(),
+    });
   });
 });

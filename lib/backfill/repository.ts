@@ -29,6 +29,12 @@ export interface BackfillSourceUpdate {
   error: string | null;
 }
 
+export interface BackfillRecoveryState {
+  cursor: string | null;
+  latestError: string | null;
+  latestUpdatedAt: number | null;
+}
+
 function iso(value: unknown): string | null {
   return typeof value === "number" ? new Date(value).toISOString() : null;
 }
@@ -115,6 +121,33 @@ export function getLatestBackfillRun(db: D1Database): Promise<BackfillRun | null
     ORDER BY created_at DESC, id DESC
     LIMIT 1
   `);
+}
+
+export async function getBackfillRecoveryState(
+  db: D1Database,
+  sourceId: SourceId,
+  beforeRunId: number,
+): Promise<BackfillRecoveryState> {
+  const cursorRow = await db.prepare(`
+    SELECT cursor FROM backfill_source_runs
+    WHERE source_id = ? AND run_id < ? AND cursor IS NOT NULL
+    ORDER BY run_id DESC
+    LIMIT 1
+  `).bind(sourceId, beforeRunId).first<{ cursor: string }>();
+  const latestRow = await db.prepare(`
+    SELECT error, updated_at FROM backfill_source_runs
+    WHERE source_id = ? AND run_id < ?
+    ORDER BY run_id DESC
+    LIMIT 1
+  `).bind(sourceId, beforeRunId).first<{
+    error: string | null;
+    updated_at: number;
+  }>();
+  return {
+    cursor: cursorRow?.cursor ?? null,
+    latestError: latestRow?.error ?? null,
+    latestUpdatedAt: latestRow?.updated_at ?? null,
+  };
 }
 
 export async function createBackfillRun(
