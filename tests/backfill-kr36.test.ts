@@ -99,6 +99,27 @@ describe("36Kr backfill adapter", () => {
     );
   });
 
+  it("reports safe diagnostics for every first-page host without a nonce", async () => {
+    const html = '<html><script>window.initialState={"isSpider":true};captcha</script></html>';
+    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(html, {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      }),
+    ));
+    const adapter = create36KrBackfillAdapter({
+      fetcher,
+      sleep: vi.fn().mockResolvedValue(undefined),
+    });
+    const bytes = new TextEncoder().encode(html).byteLength;
+
+    await expect(adapter.fetchPage(null)).rejects.toThrow(
+      `无法读取 36Kr 首屏签名：36kr.com(status=200,type=text/html,bytes=${bytes},sig=0,sp=1,risk=1); `
+      + `www.36kr.com(status=200,type=text/html,bytes=${bytes},sig=0,sp=1,risk=1); `
+      + `m.36kr.com(status=200,type=text/html,bytes=${bytes},sig=0,sp=1,risk=1)`,
+    );
+  });
+
   it("retries a temporarily invalid first-page response", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(

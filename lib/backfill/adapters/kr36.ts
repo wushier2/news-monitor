@@ -22,9 +22,20 @@ interface Kr36Cursor {
 }
 
 class FirstPageNonceError extends Error {
-  constructor() {
-    super("无法读取 36Kr 首屏签名");
+  constructor(readonly diagnostic = "") {
+    super(`无法读取 36Kr 首屏签名${diagnostic ? `：${diagnostic}` : ""}`);
   }
+}
+
+function firstPageDiagnostic(url: string, response: Response, html: string): string {
+  const contentType = response.headers.get("content-type")
+    ?.split(";", 1)[0]
+    ?.trim() || "unknown";
+  const bytes = new TextEncoder().encode(html).byteLength;
+  const spider = /["']isSpider["']\s*:\s*true/i.test(html);
+  const risk = /captcha|访问过于频繁|安全验证|人机验证|cf-chl-|verifycenter/i
+    .test(html);
+  return `${new URL(url).host}(status=${response.status},type=${contentType},bytes=${bytes},sig=0,sp=${spider ? 1 : 0},risk=${risk ? 1 : 0})`;
 }
 
 function pageResult(data: PageData | undefined, nonce: string): BackfillPageResult {
@@ -76,7 +87,9 @@ export function create36KrBackfillAdapter(
   }, async (response) => {
     const html = await response.text();
     const nonce = readNonce(html);
-    if (!nonce) throw new FirstPageNonceError();
+    if (!nonce) {
+      throw new FirstPageNonceError(firstPageDiagnostic(url, response, html));
+    }
     return nonce;
   });
   const fetchGatewayPage = async (
@@ -140,6 +153,7 @@ export function create36KrBackfillAdapter(
       if (cursor === null) {
         let nonce = "";
         let nonceError: FirstPageNonceError | null = null;
+        const diagnostics: string[] = [];
         for (const url of [
           FIRST_PAGE_URL,
           FIRST_PAGE_FALLBACK_URL,
@@ -151,9 +165,14 @@ export function create36KrBackfillAdapter(
           } catch (error) {
             if (!(error instanceof FirstPageNonceError)) throw error;
             nonceError = error;
+            if (error.diagnostic) diagnostics.push(error.diagnostic);
           }
         }
-        if (!nonce) throw nonceError ?? new FirstPageNonceError();
+        if (!nonce) {
+          throw diagnostics.length > 0
+            ? new FirstPageNonceError(diagnostics.join("; "))
+            : nonceError ?? new FirstPageNonceError();
+        }
         return fetchGatewayPage(nonce);
       }
 
