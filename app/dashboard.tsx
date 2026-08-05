@@ -12,7 +12,11 @@ import {
   buildFeedSearchParams,
   getPageTokens,
 } from "../lib/pagination";
-import { REFRESH_INTERVAL_MS, shouldAutoRefresh } from "../lib/refresh-policy";
+import {
+  REFRESH_INTERVAL_MS,
+  refreshEndpoint,
+  shouldAutoRefresh,
+} from "../lib/refresh-policy";
 import { SOURCES } from "../lib/sources";
 import {
   type AppliedTimeRange,
@@ -212,7 +216,7 @@ export default function Dashboard() {
     setRefreshing(true);
     setNotice(manual ? "正在立即刷新…" : "正在同步最新信息…");
     try {
-      const response = await fetch("/api/refresh", { method: "POST" });
+      const response = await fetch(refreshEndpoint(manual), { method: "POST" });
       const payload = await response.json() as RefreshResponse & { error?: string };
       if (!response.ok && response.status !== 207) throw new Error(payload.error ?? "刷新失败");
       const currentFilters = filtersRef.current;

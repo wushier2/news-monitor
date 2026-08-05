@@ -1,5 +1,9 @@
 export const REFRESH_INTERVAL_MS = 300_000;
 
+export function refreshEndpoint(force: boolean): string {
+  return force ? "/api/refresh?force=1" : "/api/refresh";
+}
+
 export function shouldAutoRefresh(lastSuccessAt: string | null, now = Date.now()): boolean {
   if (!lastSuccessAt) return true;
   const lastSuccess = Date.parse(lastSuccessAt);

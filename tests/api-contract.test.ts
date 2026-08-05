@@ -148,6 +148,30 @@ describe("feed and refresh API contracts", () => {
     expect(fakes.runIngestion).not.toHaveBeenCalled();
   });
 
+  it("forces ingestion even when data is still fresh", async () => {
+    fakes.getLastSuccessfulIngestion.mockResolvedValue(new Date());
+    fakes.runIngestion.mockResolvedValue({
+      status: "success",
+      successCount: 4,
+      failureCount: 0,
+      itemCount: 12,
+      refreshedAt: "2026-08-05T10:00:00.000Z",
+    });
+
+    const response = await POST(new Request(
+      "https://example.test/api/refresh?force=1",
+      { method: "POST" },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(fakes.getLastSuccessfulIngestion).not.toHaveBeenCalled();
+    expect(fakes.runIngestion).toHaveBeenCalledWith(
+      fakes.db,
+      expect.any(Date),
+      { force: true },
+    );
+  });
+
   it("skips ordinary ingestion while backfill is active", async () => {
     fakes.isBackfillActive.mockReturnValue(true);
     const response = await POST();
