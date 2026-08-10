@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import type { BackfillPageResult } from "./backfill/types";
 import type { NormalizedItem } from "./domain";
 
@@ -118,9 +117,10 @@ export async function request36KrScfPage(
   throw lastError ?? new Error("36Kr SCF 请求失败");
 }
 
-export function fetch36KrScfPage(
+export async function fetch36KrScfPage(
   cursor: string | null,
 ): Promise<BackfillPageResult> {
+  const { env } = await import("cloudflare:workers");
   const bindings = env as typeof env & {
     KR36_SCF_URL?: string;
     KR36_SCF_TOKEN?: string;

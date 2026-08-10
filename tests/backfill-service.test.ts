@@ -4,7 +4,6 @@ import type { NormalizedItem, SourceId } from "../lib/domain";
 import {
   createBackfillRun,
   getBackfillRun,
-  updateBackfillSource,
 } from "../lib/backfill/repository";
 import {
   runBackfillSources,
@@ -25,10 +24,6 @@ const migrations = [
 const windowEnd = Date.parse("2026-07-31T10:00:00.000Z");
 const windowStart = windowEnd - 86_400_000;
 const now = new Date(windowEnd);
-const kr36Page = readFileSync(new URL(
-  "./fixtures/36kr-backfill-next.json",
-  import.meta.url,
-), "utf8");
 
 function itemAt(
   publishedAt: string | null,
@@ -110,55 +105,15 @@ describe("backfill service", () => {
       .toEqual(sourceIds);
   });
 
-  it("hydrates the 36Kr adapter from a prior persisted cursor", async () => {
-    const previous = await createBackfillRun(testDb.db, {
-      sourceIds: ["36kr-macro"],
-      requestedSourceId: "36kr-macro",
-      windowStart,
-      windowEnd,
-      now,
+  it("passes the opaque cursor to an injected 36Kr SCF page fetcher", async () => {
+    const page = { items: [], nextCursor: null, exhausted: true };
+    const fetchPage = vi.fn().mockResolvedValue(page);
+    const adapter = createBackfillAdapter("36kr-macro", {
+      kr36: { fetchPage },
     });
-    await updateBackfillSource(testDb.db, previous.id, "36kr-macro", {
-      status: "complete",
-      cursor: JSON.stringify({
-        nonce: "persisted-nonce",
-        pageCallback: "persisted-callback",
-      }),
-      pagesFetched: 2,
-      itemsFetched: 40,
-      itemsInWindow: 20,
-      itemsInserted: 20,
-      itemsExisting: 0,
-      earliestCoveredAt: windowStart,
-      error: null,
-    }, now);
-    const current = await createBackfillRun(testDb.db, {
-      sourceIds: ["36kr-macro"],
-      requestedSourceId: "36kr-macro",
-      windowStart,
-      windowEnd,
-      now: new Date(now.getTime() + 1),
-    });
-    const fetcher = vi.fn().mockImplementation(
-      () => Promise.resolve(new Response(kr36Page)),
-    );
-    vi.stubGlobal("fetch", fetcher);
 
-    try {
-      const adapter = createBackfillAdapter("36kr-macro", {
-        db: testDb.db,
-        beforeRunId: current.id,
-        kr36: { fetcher, now: () => now.getTime() },
-      });
-      const result = await adapter.fetchPage(null);
-
-      expect(result.items).toHaveLength(2);
-      expect(fetcher).toHaveBeenCalledTimes(1);
-      expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)))
-        .toMatchObject({ nonce: "persisted-nonce" });
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    await expect(adapter.fetchPage("opaque-cursor")).resolves.toEqual(page);
+    expect(fetchPage).toHaveBeenCalledWith("opaque-cursor");
   });
 
   it("stops complete after reaching the fixed 24-hour cutoff", async () => {

@@ -2,9 +2,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createBackfillRun,
-  finishBackfillRun,
   getBackfillRun,
-  updateBackfillSource,
 } from "../lib/backfill/repository";
 import {
   isBackfillActive,
@@ -19,10 +17,6 @@ const migrations = [
   "../drizzle/0001_backfill_runs.sql",
 ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"));
 const now = new Date("2026-07-31T10:00:00.000Z");
-const kr36Page = readFileSync(new URL(
-  "./fixtures/36kr-backfill-next.json",
-  import.meta.url,
-), "utf8");
 
 describe("backfill runner", () => {
   let testDb: ReturnType<typeof createTestD1>;
@@ -94,36 +88,12 @@ describe("backfill runner", () => {
     )).rejects.toThrow("未知来源");
   });
 
-  it("passes persisted 36Kr recovery state to the default adapter", async () => {
-    const previous = await createBackfillRun(testDb.db, {
-      sourceIds: ["36kr-macro"],
-      requestedSourceId: "36kr-macro",
-      windowStart: now.getTime() - 86_400_000,
-      windowEnd: now.getTime(),
-      now,
+  it("runs a 36Kr task through the injected SCF-backed adapter", async () => {
+    const fetchPage = vi.fn().mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      exhausted: true,
     });
-    await updateBackfillSource(testDb.db, previous.id, "36kr-macro", {
-      status: "complete",
-      cursor: JSON.stringify({
-        nonce: "runner-cached-nonce",
-        pageCallback: "runner-cached-callback",
-      }),
-      pagesFetched: 2,
-      itemsFetched: 40,
-      itemsInWindow: 20,
-      itemsInserted: 20,
-      itemsExisting: 0,
-      earliestCoveredAt: now.getTime() - 86_400_000,
-      error: null,
-    }, now);
-    await finishBackfillRun(testDb.db, previous.id, "complete", now);
-    const fetcher = vi.fn().mockImplementation((
-      _input: string | URL | Request,
-      init?: RequestInit,
-    ) => Promise.resolve(init?.method === "POST"
-      ? new Response(kr36Page)
-      : new Response("<html>captcha</html>")));
-    vi.stubGlobal("fetch", fetcher);
     const runSources = vi.fn(async ({ adapters }: {
       adapters: BackfillAdapter[];
     }) => {
@@ -131,21 +101,16 @@ describe("backfill runner", () => {
       return "complete" as const;
     });
 
-    try {
-      const result = await startBackfill(testDb.db, {
-        sourceId: "36kr-macro",
-      }, new Date(now.getTime() + 1), {
-        runSources,
-        waitBetweenPages: async () => undefined,
-      });
-      await result.completion;
+    const result = await startBackfill(testDb.db, {
+      sourceId: "36kr-macro",
+    }, new Date(now.getTime() + 1), {
+      createAdapter: (sourceId) => ({ sourceId, fetchPage }),
+      runSources,
+      waitBetweenPages: async () => undefined,
+    });
+    await result.completion;
 
-      expect(fetcher).toHaveBeenCalledTimes(1);
-      expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)))
-        .toMatchObject({ nonce: "runner-cached-nonce" });
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    expect(fetchPage).toHaveBeenCalledWith(null);
   });
 
   it("marks a database-only running task interrupted after restart", async () => {
