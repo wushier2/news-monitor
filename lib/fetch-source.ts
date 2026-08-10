@@ -1,6 +1,6 @@
 import { md5 } from "js-md5";
 import type { NormalizedItem, SourceDefinition } from "./domain";
-import { parse36Kr } from "./parsers/kr36";
+import { fetch36KrScfPage } from "./kr36-scf-client";
 import { parseCls } from "./parsers/cls";
 import { parseJiemian } from "./parsers/jiemian";
 
@@ -66,8 +66,10 @@ export async function fetchSource(source: SourceDefinition): Promise<NormalizedI
   if (source.id === "cls-headline") {
     return parseCls(await fetchText(await buildClsUrl()));
   }
+  if (source.id === "36kr-macro") {
+    return (await fetch36KrScfPage(null)).items;
+  }
   const html = await fetchText(source.url);
-  if (source.id === "36kr-macro") return parse36Kr(html);
   if (source.id === "jiemian-regulatory") {
     return parseJiemian(html, source.id, "监管通报");
   }
