@@ -304,6 +304,22 @@ button:focus-visible, input:focus-visible, a:focus-visible {
 .feed-heading h2 { margin: 5px 0 0; font-family: "STSong", "SimSun", serif; font-size: 27px; }
 .feed-heading p { margin: 0; color: var(--muted); font-size: 11px; }
 .feed { min-height: 460px; }
+.feed-date-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 26px 3px;
+  color: var(--forest);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+.feed-date-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: #cfd8d1;
+}
 .feed-item {
   display: grid;
   grid-template-columns: 125px minmax(0, 1fr) 110px;
@@ -452,6 +468,7 @@ footer {
   .backfill-metrics { flex-wrap: wrap; }
   .feed-heading { padding: 20px 16px 12px; }
   .feed-heading p { display: none; }
+  .feed-date-divider { padding: 13px 16px 2px; }
   .feed-item { grid-template-columns: 82px minmax(0, 1fr); gap: 12px; padding: 16px; }
   .feed-item time { display: none; }
   .item-content h3 { font-size: 15px; }

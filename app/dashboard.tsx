@@ -34,6 +34,7 @@ import {
   backfillToggleLabel,
   shouldAutoExpandBackfill,
 } from "../lib/backfill/presentation";
+import { partitionFeedItemsByBeijingDate } from "../lib/feed-date-groups";
 
 const PAGE_SIZE = 50;
 const EMPTY_PAGINATION: PaginationMeta = {
@@ -61,6 +62,7 @@ const EMPTY_FEED: FeedResponse = {
 function formatTime(value: string | null): string {
   if (!value) return "尚未采集";
   return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -127,6 +129,10 @@ export default function Dashboard() {
   const runningBackfillId = backfillRun?.status === "running"
     ? backfillRun.id
     : null;
+  const feedDateGroups = useMemo(
+    () => partitionFeedItemsByBeijingDate(feed.items),
+    [feed.items],
+  );
 
   useEffect(() => {
     filtersRef.current = { query, sourceId, appliedRange };
@@ -655,20 +661,33 @@ export default function Dashboard() {
       </section>
 
       <section className="feed" aria-live="polite" aria-busy={loading || refreshing}>
-        {feed.items.length > 0 ? feed.items.map((item) => (
-          <article className="feed-item" key={`${item.sourceId}-${item.id}`}>
-            <div className="item-source">
-              <span>{item.sourceName}</span>
-              <small>{item.channelName}</small>
-            </div>
-            <a href={item.url} target="_blank" rel="noreferrer" className="item-content">
-              <h3>{item.title}</h3>
-              {item.summary && <p>{item.summary}</p>}
-            </a>
-            <time dateTime={item.publishedAt ?? item.firstSeenAt}>
-              {formatTime(item.publishedAt ?? item.firstSeenAt)}
-            </time>
-          </article>
+        {feed.items.length > 0 ? feedDateGroups.map((group) => (
+          <div className="feed-date-group" key={group.id}>
+            {group.label && (
+              <div
+                className="feed-date-divider"
+                role="separator"
+                aria-label={group.label}
+              >
+                <span>{group.label}</span>
+              </div>
+            )}
+            {group.items.map((item) => (
+              <article className="feed-item" key={`${item.sourceId}-${item.id}`}>
+                <div className="item-source">
+                  <span>{item.sourceName}</span>
+                  <small>{item.channelName}</small>
+                </div>
+                <a href={item.url} target="_blank" rel="noreferrer" className="item-content">
+                  <h3>{item.title}</h3>
+                  {item.summary && <p>{item.summary}</p>}
+                </a>
+                <time dateTime={item.publishedAt ?? item.firstSeenAt}>
+                  {formatTime(item.publishedAt ?? item.firstSeenAt)}
+                </time>
+              </article>
+            ))}
+          </div>
         )) : (
           <div className="empty-state">
             <span>{loading ? "同步中" : fatalError ? "采集暂时不可用" : "暂无记录"}</span>
