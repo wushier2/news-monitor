@@ -497,6 +497,7 @@ export default function Dashboard() {
 
   function changePage(targetPage: number) {
     if (
+      filterLoading ||
       pageLoading ||
       targetPage < 1 ||
       targetPage > feed.pagination.totalPages ||
@@ -765,10 +766,16 @@ export default function Dashboard() {
           <span className="section-kicker">LATEST INTELLIGENCE</span>
           <h2>{sourceId === "all" ? "最新信息流" : SOURCES.find((source) => source.id === sourceId)?.channelName}</h2>
         </div>
-        <p>{notice}</p>
+        <p role={filterStatus?.includes("失败") ? "alert" : undefined}>
+          {filterStatus ?? notice}
+        </p>
       </section>
 
-      <section className="feed" aria-live="polite" aria-busy={loading || refreshing}>
+      <section
+        className={`feed ${filterLoading ? "feed-filter-loading" : ""}`}
+        aria-live="polite"
+        aria-busy={loading || refreshing || filterLoading}
+      >
         {feed.items.length > 0 ? feedDateGroups.map((group) => (
           <div className="feed-date-group" key={group.id}>
             {group.label && (
@@ -812,7 +819,7 @@ export default function Dashboard() {
         {feed.pagination.totalPages > 1 && (
           <div className="pagination-controls">
             <button
-              disabled={pageLoading || page <= 1}
+              disabled={filterLoading || pageLoading || page <= 1}
               onClick={() => changePage(page - 1)}
             >
               上一页
@@ -822,7 +829,7 @@ export default function Dashboard() {
                 key={token}
                 className={token === page ? "page-active" : ""}
                 aria-current={token === page ? "page" : undefined}
-                disabled={pageLoading}
+                disabled={filterLoading || pageLoading}
                 onClick={() => changePage(token)}
               >
                 {token}
@@ -832,6 +839,7 @@ export default function Dashboard() {
             ))}
             <button
               disabled={
+                filterLoading ||
                 pageLoading ||
                 page >= feed.pagination.totalPages
               }
