@@ -3,6 +3,7 @@ import {
   FeedRequestCoordinator,
   SEARCH_FILTER_DELAY_MS,
   feedFilterDelay,
+  feedLoadFailureMessage,
   isAbortError,
 } from "../lib/feed-request-policy";
 
@@ -38,5 +39,18 @@ describe("feed request policy", () => {
     expect(isAbortError({ name: "AbortError" })).toBe(true);
     expect(isAbortError(new Error("network failed"))).toBe(false);
     expect(isAbortError(null)).toBe(false);
+  });
+
+  it("suppresses abort messages and explains when stale content is retained", () => {
+    expect(feedLoadFailureMessage("source", { name: "AbortError" }))
+      .toBeNull();
+    expect(feedLoadFailureMessage("source", new Error("Network connection lost.")))
+      .toBe("切换失败：Network connection lost.；以下仍为上一次结果");
+    expect(feedLoadFailureMessage("search", new Error("读取失败")))
+      .toBe("筛选失败：读取失败；以下仍为上一次结果");
+    expect(feedLoadFailureMessage("time", new Error("读取失败")))
+      .toBe("筛选失败：读取失败；以下仍为上一次结果");
+    expect(feedLoadFailureMessage("page", new Error("读取失败")))
+      .toBe("分页加载失败");
   });
 });

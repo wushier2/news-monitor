@@ -35,6 +35,13 @@ import {
   shouldAutoExpandBackfill,
 } from "../lib/backfill/presentation";
 import { partitionFeedItemsByBeijingDate } from "../lib/feed-date-groups";
+import {
+  FeedRequestCoordinator,
+  SEARCH_FILTER_DELAY_MS,
+  feedLoadFailureMessage,
+  isAbortError,
+  type FeedLoadReason,
+} from "../lib/feed-request-policy";
 
 const PAGE_SIZE = 50;
 const EMPTY_PAGINATION: PaginationMeta = {
@@ -75,11 +82,26 @@ function newestSuccess(sources: SourceHealth[]): number {
   return Math.max(0, ...sources.map((source) => source.lastSuccessAt ? Date.parse(source.lastSuccessAt) : 0));
 }
 
+type FeedLoadOutcome =
+  | { status: "success"; feed: FeedResponse }
+  | { status: "aborted" }
+  | { status: "failed" };
+
+function sourceFilterLabel(sourceId: SourceId | "all"): string {
+  if (sourceId === "all") return "全部来源";
+  const source = SOURCES.find((item) => item.id === sourceId);
+  if (!source) return "所选来源";
+  return source.sourceName === "界面新闻"
+    ? `界面${source.channelName.slice(0, 2)}`
+    : source.sourceName;
+}
+
 async function requestFeed(
   nextQuery = "",
   nextSource: SourceId | "all" = "all",
   range: AppliedTimeRange | null = null,
   page = 1,
+  signal?: AbortSignal,
 ): Promise<FeedResponse> {
   const params = buildFeedSearchParams({
     query: nextQuery,
@@ -90,6 +112,7 @@ async function requestFeed(
   });
   const response = await fetch(`/api/feed?${params.toString()}`, {
     cache: "no-store",
+    signal,
   });
   const payload = await response.json() as FeedResponse & { error?: string };
   if (!response.ok) throw new Error(payload.error ?? "无法读取信息流");
@@ -113,6 +136,8 @@ export default function Dashboard() {
   const [page, setPage] = useState(1);
   const [pageLoading, setPageLoading] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [filterLoading, setFilterLoading] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<string | null>(null);
   const [backfillRun, setBackfillRun] = useState<BackfillRun | null>(null);
   const [backfillStarting, setBackfillStarting] = useState(false);
   const [backfillError, setBackfillError] = useState<string | null>(null);
@@ -121,8 +146,12 @@ export default function Dashboard() {
   const pickerBounds = useMemo(() => getBeijingInputBounds(), []);
   const refreshingRef = useRef(false);
   const filtersRef = useRef({ query, sourceId, appliedRange });
-  const requestSequenceRef = useRef(0);
-  const filterEffectReadyRef = useRef(false);
+  const feedRequestCoordinatorRef = useRef(new FeedRequestCoordinator());
+  const filterRequestActiveRef = useRef(false);
+  const searchTimerRef = useRef<number | null>(null);
+  const searchEffectReadyRef = useRef(false);
+  const sourceEffectReadyRef = useRef(false);
+  const timeEffectReadyRef = useRef(false);
   const mountedRef = useRef(true);
   const feedHeadingRef = useRef<HTMLElement | null>(null);
   const observedRunningBackfillsRef = useRef(new Set<number>());
@@ -162,9 +191,26 @@ export default function Dashboard() {
     nextSource: SourceId | "all",
     nextRange: AppliedTimeRange | null,
     targetPage: number,
-    reason: "initial" | "filter" | "page" | "refresh",
-  ): Promise<FeedResponse | null> => {
-    const requestId = ++requestSequenceRef.current;
+    reason: FeedLoadReason,
+  ): Promise<FeedLoadOutcome> => {
+    if (reason === "refresh" && filterRequestActiveRef.current) {
+      return { status: "aborted" };
+    }
+
+    const coordinator = feedRequestCoordinatorRef.current;
+    const ticket = coordinator.begin();
+    const isFilterRequest = reason === "search"
+      || reason === "source"
+      || reason === "time";
+    if (isFilterRequest) {
+      filterRequestActiveRef.current = true;
+      setFilterLoading(true);
+      setFilterStatus(
+        reason === "source"
+          ? `正在切换至${sourceFilterLabel(nextSource)}…`
+          : "正在更新筛选结果…",
+      );
+    }
     setPageError(null);
     setPageLoading(reason === "page");
     try {
@@ -173,16 +219,21 @@ export default function Dashboard() {
         nextSource,
         nextRange,
         targetPage,
+        ticket.signal,
       );
       if (
         !mountedRef.current ||
-        requestId !== requestSequenceRef.current
+        !coordinator.isCurrent(ticket)
       ) {
-        return null;
+        return { status: "aborted" };
       }
       setFeed(payload);
       setPage(payload.pagination.page);
       setFatalError(null);
+      if (isFilterRequest) {
+        setFilterStatus(null);
+        setNotice("筛选结果已更新");
+      }
       if (reason === "page") {
         window.requestAnimationFrame(() => {
           feedHeadingRef.current?.scrollIntoView({
@@ -191,26 +242,33 @@ export default function Dashboard() {
           });
         });
       }
-      return payload;
+      return { status: "success", feed: payload };
     } catch (error) {
       if (
+        isAbortError(error) ||
         !mountedRef.current ||
-        requestId !== requestSequenceRef.current
+        !coordinator.isCurrent(ticket)
       ) {
-        return null;
+        return { status: "aborted" };
       }
-      const message = error instanceof Error ? error.message : "读取失败";
+      const message = feedLoadFailureMessage(reason, error);
       if (reason === "page") {
-        setPageError("分页加载失败");
+        setPageError(message);
+      } else if (isFilterRequest) {
+        setFilterStatus(message);
       } else {
         setFatalError(message);
       }
-      return null;
+      return { status: "failed" };
     } finally {
       if (
         mountedRef.current &&
-        requestId === requestSequenceRef.current
+        coordinator.isCurrent(ticket)
       ) {
+        if (isFilterRequest) {
+          filterRequestActiveRef.current = false;
+          setFilterLoading(false);
+        }
         setPageLoading(false);
       }
     }
@@ -226,14 +284,15 @@ export default function Dashboard() {
       const payload = await response.json() as RefreshResponse & { error?: string };
       if (!response.ok && response.status !== 207) throw new Error(payload.error ?? "刷新失败");
       const currentFilters = filtersRef.current;
-      const nextFeed = await loadFeed(
+      const result = await loadFeed(
         currentFilters.query,
         currentFilters.sourceId,
         currentFilters.appliedRange,
         1,
         "refresh",
       );
-      if (!nextFeed) {
+      if (result.status === "aborted") return;
+      if (result.status === "failed") {
         setNotice("刷新后读取第 1 页失败");
         return;
       }
@@ -259,11 +318,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     let active = true;
+    const feedRequestCoordinator = feedRequestCoordinatorRef.current;
     mountedRef.current = true;
     const initialTimer = window.setTimeout(() => {
-      void loadFeed("", "all", null, 1, "initial").then((payload) => {
-        if (!active || !payload) return;
-        const lastSuccess = newestSuccess(payload.sources);
+      void loadFeed("", "all", null, 1, "initial").then((result) => {
+        if (!active || result.status !== "success") return;
+        const lastSuccess = newestSuccess(result.feed.sources);
         if (shouldAutoRefresh(lastSuccess ? new Date(lastSuccess).toISOString() : null)) {
           void refresh(false);
         } else {
@@ -276,28 +336,76 @@ export default function Dashboard() {
     return () => {
       active = false;
       mountedRef.current = false;
-      requestSequenceRef.current += 1;
+      feedRequestCoordinator.cancel();
+      if (searchTimerRef.current !== null) {
+        window.clearTimeout(searchTimerRef.current);
+      }
       window.clearTimeout(initialTimer);
       window.clearInterval(timer);
     };
   }, [loadFeed, refresh]);
 
   useEffect(() => {
-    if (!filterEffectReadyRef.current) {
-      filterEffectReadyRef.current = true;
+    if (!searchEffectReadyRef.current) {
+      searchEffectReadyRef.current = true;
       return;
     }
-    const timer = window.setTimeout(() => {
+    searchTimerRef.current = window.setTimeout(() => {
+      searchTimerRef.current = null;
+      const currentFilters = filtersRef.current;
       void loadFeed(
-        query,
-        sourceId,
-        appliedRange,
+        currentFilters.query,
+        currentFilters.sourceId,
+        currentFilters.appliedRange,
         1,
-        "filter",
+        "search",
       );
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [query, sourceId, appliedRange, loadFeed]);
+    }, SEARCH_FILTER_DELAY_MS);
+    return () => {
+      if (searchTimerRef.current !== null) {
+        window.clearTimeout(searchTimerRef.current);
+        searchTimerRef.current = null;
+      }
+    };
+  }, [query, loadFeed]);
+
+  useEffect(() => {
+    if (!sourceEffectReadyRef.current) {
+      sourceEffectReadyRef.current = true;
+      return;
+    }
+    if (searchTimerRef.current !== null) {
+      window.clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = null;
+    }
+    const currentFilters = filtersRef.current;
+    void loadFeed(
+      currentFilters.query,
+      currentFilters.sourceId,
+      currentFilters.appliedRange,
+      1,
+      "source",
+    );
+  }, [sourceId, loadFeed]);
+
+  useEffect(() => {
+    if (!timeEffectReadyRef.current) {
+      timeEffectReadyRef.current = true;
+      return;
+    }
+    if (searchTimerRef.current !== null) {
+      window.clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = null;
+    }
+    const currentFilters = filtersRef.current;
+    void loadFeed(
+      currentFilters.query,
+      currentFilters.sourceId,
+      currentFilters.appliedRange,
+      1,
+      "time",
+    );
+  }, [appliedRange, loadFeed]);
 
   useEffect(() => {
     let active = true;
